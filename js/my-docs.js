@@ -76,7 +76,13 @@
   let _filter = "all";       // all | image | pdf | voice | link | newest | oldest
   let _subjects = [];
   let _items = [];
+  let _itemPage = null;
+  let _itemGeneration = 0;
+  const _itemPages = new Map();
+  const ITEM_PAGE_SIZE = 30;
   let _loaded = false;
+  let _loadedWorld = null;
+  let _subjectLoadGeneration = 0;
   let _loadedUid = null;     // الحساب اللي اتحمّلت بياناته آخر مرة
   let _currentSubjectId = null;
   let _draftSubject = null;  // {id?, name, code}
@@ -107,16 +113,18 @@
      تحميل المواد
   ───────────────────────────────────────── */
   async function _load() {
+    const generation = ++_subjectLoadGeneration, uid = _uid(), wid = _worldId();
+    _itemPages.clear();
     const body = _body();
     if (body) body.innerHTML = `<div class="md-loading"><div class="md-spin"></div></div>`;
     try {
       const { db, collection, getDocs, query, where } = await _fs();
-      const wid = _worldId();
       const snap = await getDocs(query(collection(db, COL_SUBJECTS), where("worldId", "==", wid)));
+      if (generation !== _subjectLoadGeneration || uid !== _uid() || wid !== _worldId()) return;
       _subjects = [];
       snap.forEach((d) => { const data = d.data(); if (wid && data.worldId === wid) _subjects.push({ id: d.id, ...data }); });
       _loaded = true;
-      _loadedUid = _uid();
+      _loadedUid = uid; _loadedWorld = wid;
       _renderHome();
     } catch (e) {
       if (body) body.innerHTML = `<div class="md-empty"><div class="md-empty-title">تعذّر تحميل مستنداتي</div></div>`;
@@ -158,54 +166,73 @@
   /* ─────────────────────────────────────────
      استعلام العناصر — كل الفروع فيها worldId صراحة
   ───────────────────────────────────────── */
-  async function _queryItems(db, { collection, getDocs, query, where, orderBy }, subjectId, worldId, filter) {
+  async function _queryItems(db, fns, subjectId, worldId, filter, cursor) {
+    const { collection, getDocs, query, where, orderBy, startAfter, limit } = fns;
     const base = [where("subjectId", "==", subjectId), where("worldId", "==", worldId)];
-    if (filter === "image" || filter === "pdf" || filter === "voice" || filter === "link") {
-      base.push(where("type", "==", filter));
-      base.push(orderBy("order", "asc"));
-    } else if (filter === "newest") {
-      base.push(orderBy("order", "desc"));
-    } else {
-      // "all" | "oldest"
-      base.push(orderBy("order", "asc"));
-    }
-    const snap = await getDocs(query(collection(db, COL_ITEMS), ...base));
-    const out = [];
-    snap.forEach((d) => out.push({ id: d.id, ...d.data() }));
-    return out;
+    if (["image","pdf","voice","link"].includes(filter)) base.push(where("type", "==", filter));
+    base.push(orderBy("order", filter === "newest" ? "desc" : "asc"));
+    if (cursor) base.push(startAfter(cursor));
+    base.push(limit(ITEM_PAGE_SIZE));
+    return getDocs(query(collection(db, COL_ITEMS), ...base));
   }
 
-  window.MyDocsModule._openSubject = async function (subjectId) {
-    _currentSubjectId = subjectId;
-    _filter = "all";
-    _view = "subject";
-    const subj = _subjects.find((s) => s.id === subjectId);
-    _setTitle(subj ? subj.name : "المادة");
-    const body = _body();
-    if (body) body.innerHTML = `<div class="md-loading"><div class="md-spin"></div></div>`;
-    try {
-      const fns = await _fs();
-      const subjNow = _subjects.find((s) => s.id === subjectId);
-      _items = await _queryItems(fns.db, fns, subjectId, subjNow ? subjNow.worldId : _worldId(), _filter);
-      _renderSubject();
-    } catch (e) {
-      if (body) body.innerHTML = `<div class="md-empty"><div class="md-empty-title">تعذّر تحميل محتوى المادة</div></div>`;
+  async function _loadItemsPage(more = false) {
+    const generation = ++_itemGeneration;
+    const uid = _uid(), worldId = _worldId(), subjectId = _currentSubjectId, filter = _filter;
+    const current = () => generation === _itemGeneration && uid === _uid() && worldId === _worldId() && subjectId === _currentSubjectId && filter === _filter;
+    if (!uid || !worldId || !subjectId) return;
+    const key = JSON.stringify([uid,worldId,subjectId,filter === "oldest" ? "all" : filter]);
+    let page = _itemPages.get(key);
+    if (!page || (!more && Date.now()-page.at > 60000)) {
+      page = {items:[],cursor:null,done:false,at:Date.now(),pending:null};
+      _itemPages.set(key,page);
     }
+    const body = _body();
+    if (!more && body) body.innerHTML = `<div class="md-loading"><div class="md-spin"></div></div>`;
+    try {
+      if ((!page.items.length && !page.done) || (more && !page.done)) {
+        if (!page.pending) {
+          page.pending = (async () => {
+            const fns = await _fs();
+            const snap = await _queryItems(fns.db,fns,subjectId,worldId,filter,page.cursor);
+            const seen = new Set(page.items.map(it=>it.id));
+            snap.docs.forEach(d=>{ if (!seen.has(d.id)) { seen.add(d.id); page.items.push({id:d.id,...d.data()}); } });
+            page.cursor = snap.docs.at(-1) || page.cursor;
+            page.done = snap.size < ITEM_PAGE_SIZE;
+            page.at = Date.now();
+            if (snap.metadata?.fromCache) {
+              // Cached query results do not prove that a page is complete.
+              page.done = false; page.at = 0;
+              if (_itemPages.get(key) === page) _itemPages.delete(key);
+            }
+          })().finally(()=>{page.pending=null;});
+        }
+        await page.pending;
+      }
+      if (!current()) return;
+      _items = page.items; _itemPage = page; _renderSubject();
+    } catch(e) {
+      if (!current()) return;
+      if (more) { _renderSubject(); window.toast?.("تعذّر تحميل المزيد، حاول مرة أخرى", "error"); }
+      else if(body) body.innerHTML = `<div class="md-empty"><div class="md-empty-title">تعذّر تحميل محتوى المادة</div></div>`;
+    }
+  }
+  window.MyDocsModule._openSubject = async function (subjectId) {
+    _currentSubjectId = subjectId; _filter = "all"; _view = "subject";
+    const subj = _subjects.find(s=>s.id===subjectId);
+    _setTitle(subj ? subj.name : "المادة");
+    return _loadItemsPage();
   };
-
   window.MyDocsModule._setFilter = async function (f) {
     if (!_currentSubjectId) return;
-    _filter = f;
-    const body = _body();
-    if (body) body.innerHTML = `<div class="md-loading"><div class="md-spin"></div></div>`;
-    try {
-      const fns = await _fs();
-      const subj = _subjects.find((s) => s.id === _currentSubjectId);
-      _items = await _queryItems(fns.db, fns, _currentSubjectId, subj ? subj.worldId : _worldId(), _filter);
-      _renderSubject();
-    } catch (e) {
-      if (body) body.innerHTML = `<div class="md-empty"><div class="md-empty-title">تعذّر تحميل محتوى المادة</div></div>`;
-    }
+    _filter = f; _view = "subject";
+    return _loadItemsPage();
+  };
+  window.MyDocsModule._loadMoreItems = async function () {
+    if (!_itemPage || _itemPage.done || _itemPage.pending) return;
+    const button = document.getElementById("mdLoadMoreItems");
+    if (button) { button.disabled = true; button.textContent = "جاري التحميل..."; }
+    return _loadItemsPage(true);
   };
 
   const FILTERS = [
@@ -245,6 +272,7 @@
         <div class="md-items-list">
           ${_items.map((it) => _renderItemCard(it, admin)).join("")}
         </div>`}
+      ${_itemPage && !_itemPage.done ? `<button id="mdLoadMoreItems" class="md-btn-primary" style="margin:16px auto;display:block" onclick="window.MyDocsModule._loadMoreItems()">عرض المزيد من المحتوى</button>` : ""}
     `;
   }
 
@@ -637,7 +665,7 @@
   ───────────────────────────────────────── */
   window.MyDocsModule._back = function () {
     if (_view === "subjectForm" || _view === "itemForm") { _currentSubjectId ? _renderSubject() : _renderHome(); return; }
-    if (_view === "subject") { _currentSubjectId = null; _renderHome(); return; }
+    if (_view === "subject") { ++_itemGeneration; _currentSubjectId = null; _renderHome(); return; }
     window.MyDocsModule.close();
   };
   window.MyDocsModule.open = function () {
@@ -646,9 +674,10 @@
     root.classList.add("md-open");
     root.style.display = "flex";
     _buildShell();
-    if (_loaded) _renderHome(); else _load();
+    if (_loaded && _loadedUid === _uid() && _loadedWorld === _worldId()) _renderHome(); else _load();
   };
   window.MyDocsModule.close = function () {
+    ++_itemGeneration; ++_subjectLoadGeneration;
     const root = _root();
     if (!root) return;
     root.classList.remove("md-open");
@@ -667,8 +696,8 @@
     const root = _root();
     const wasOpen = !!(root && root.classList.contains("md-open"));
     if (wasOpen) window.MyDocsModule.close();
-    _loaded = false; _loadedUid = null;
-    _subjects = []; _items = [];
+    _loaded = false; _loadedUid = null; _loadedWorld = null;
+    _subjects = []; _items = []; _itemPage = null; _itemPages.clear(); ++_itemGeneration;
     _view = "home"; _tab = "active"; _filter = "all";
     _currentSubjectId = null; _draftSubject = null; _draftItem = null;
     if (_isRecording && _mediaRecorder) { try { _mediaRecorder.stop(); } catch (e) {} _isRecording = false; }
