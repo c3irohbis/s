@@ -277,6 +277,7 @@
         completedAt: !wasDone ? serverTimestamp() : null,
       }, { merge: true });
     } catch (e) {
+      if (uid !== _uid()) return;
       // تراجع عند الفشل
       _completions[sheetId] = { sheetId, subjectId, completed: wasDone, completedAt: wasDone ? new Date() : null };
       _renderSubject();
