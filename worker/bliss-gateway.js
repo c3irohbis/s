@@ -97,6 +97,12 @@ async function verifyToken(idToken, projectId) {
   return payload; // صلاحية التوكن ليست صلاحيات المستخدم داخل الموقع
 }
 
+/* ── بصمة ETag: هاش لحالة الكروت الحالية ── */
+async function sha256hex(s) {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
+}
+
 /* ── مفاتيح الكروت: KV flags ثم المتغير الافتراضي ثم firebase (لا ينهار عند غياب KV) ── */
 async function readFlags(env) {
   let raw = null;
@@ -142,7 +148,13 @@ export default {
 
     // 5-6) كروت عامة: يكفي توكن صالح لأي مستخدم مسجل (يطابق allow read: if isSignedIn())
     const cards = await readFlags(env);
-    // 7) غلاف ثابت + كاش 60 ثانية
-    return ok(request, env, { cards }, { complete: true, count: CARD_KEYS.length, generatedAt: Date.now() }, { "Cache-Control": "max-age=60" });
+    // 7) ETag لحالة المجموعة + دعم If-None-Match ← 304
+    const etag = '"cfg-' + (await sha256hex(JSON.stringify(cards))).slice(0, 24) + '"';
+    const cacheH = { "Cache-Control": "max-age=60", "ETag": etag };
+    const inm = request.headers.get("If-None-Match");
+    if (inm && inm.split(",").map(s => s.trim()).includes(etag))
+      return new Response(null, { status: 304, headers: { ...corsHeaders(request, env), ...cacheH } });
+    // 8) غلاف ثابت + كاش 60 ثانية
+    return ok(request, env, { cards }, { complete: true, count: CARD_KEYS.length, version: V, generatedAt: Date.now(), etag }, cacheH);
   },
 };
