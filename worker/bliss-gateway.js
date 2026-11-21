@@ -6,6 +6,12 @@
      GET  /v1/admin/reconcile/instructions    فحص فقط — المالك فقط
      POST /v1/admin/reconcile/instructions/fix إصلاح يدوي — المالك فقط
      GET  /v1/admin/shadow/instructions       مقارنة وتسجيل أعداد في shadow_log — المالك فقط
+   المرحلة 3.0 (بنية عامة كامنة — كل الأعلام firebase، لا تفعيل):
+     GET  /v1/cards/{card}/content?world=     قراءة كارت عام من card_items (المسجل فقط: news)
+     POST /v1/cards/{card}/sync               مزامنة مفتاح أو ?all=1 — المالك فقط
+     GET  /v1/cards/{card}/reconcile          فحص فقط — المالك فقط
+     POST /v1/cards/{card}/reconcile/fix      إصلاح يدوي — المالك فقط
+     GET  /v1/cards/{card}/shadow             مقارنة وتسجيل أعداد — المالك فقط
    الأسرار والإعدادات في متغيرات بيئة الـ Worker فقط (لا شيء في الكود):
      FIREBASE_PROJECT_ID  (Variable)  معرّف مشروع Firebase
      OWNER_UID            (Variable)  UID المالك الثابت (يطابق isOwner() في القواعد)
@@ -503,6 +509,432 @@ async function handleShadow(request, env, user) {
     { complete: true, count: compared, version: V, generatedAt: Date.now() });
 }
 
+
+/* ═══ المرحلة 3.0: البنية العامة للكروت ← card_items ═══
+   كاملة لكن كامنة: كل مفاتيح الكروت في KV ما زالت "firebase"، فالمسارات العامة
+   ترد 503 disabled لأي طالب. كارت instructions يبقى على جدوله ومساراته الخاصة أعلاه.
+   فصل الكروت مفروض في ثلاث نقاط: قيد CHECK + تحقق داخل الـRPC في قاعدة البيانات،
+   ومفتاح الكارت هنا يأتي من مسار الـURL ويُطابَق مع السجل — لا يُقبل من جسم الطلب أبدًا. */
+
+/* العوالم الـ16 الثابتة (مطابقة js/world-model.js) */
+const WORLDS = new Set([
+  "is_1","is_2","is_3","is_4","lt_1","lt_2","lt_3","lt_4",
+  "th_1","th_2","th_3","th_4","ba_1","ba_2","ba_3","ba_4",
+]);
+
+const CARD_LIMITS = {
+  MAX_ITEMS: 500,            // أقصى عناصر لكل كارت/عالم في الرد
+  MAX_RESP_BYTES: 512 * 1024,
+  MAX_SYNC_BODY: 64 * 1024,
+  CACHE_TTL_S: 60,
+  FS_PAGE_SIZE: 300,
+};
+
+/* سجل الكروت المفعّلة بنيويًا: news فقط في 3.0. كل كارت جديد يُضاف هنا بمرحلته الخاصة. */
+const CARDS = {
+  news: {
+    col: "news",             // مجموعة Firestore
+    worldScoped: true,       // عالم إلزامي في القراءة والكتابة
+    MAX_TITLE: 500,
+    MAX_BODY: 10000,
+    /* فك مستند Firestore ← عنصر داخلي + تحقق الشكل قبل أي كتابة في Supabase */
+    FIELDS: new Set(["title", "body", "worldId", "createdAt", "updatedAt", "updatedBy"]),
+    decode(doc) {
+      const key = decodeURIComponent((doc.name || "").split("/").pop() || "");
+      const f = doc.fields || {};
+      // صرامة الشكل (مراجعة المالك نقطة 4): أي حقل خارج مخطط الأخبار يرفض المستند كله
+      for (const fname of Object.keys(f)) if (!this.FIELDS.has(fname)) return { error: "unknown-field:" + fname };
+      // ساعة المصدر إلزامية (مراجعة المالك نقطة 3): NULL لا يصل RPC أبدًا من هنا
+      if (typeof doc.updateTime !== "string" || !doc.updateTime) return { error: "missing-source-time" };
+      const item = {
+        title: fsDecode(f.title),
+        body: fsDecode(f.body) ?? "",
+        worldId: fsDecode(f.worldId),
+        createdAt: fsDecode(f.createdAt) ?? null,
+        updatedAt: fsDecode(f.updatedAt) ?? null,
+        updatedBy: fsDecode(f.updatedBy) ?? "",
+        sourceUpdateTime: doc.updateTime,
+      };
+      if (typeof item.title !== "string" || !item.title.trim()) return { error: "bad-title" };
+      if (item.title.length > this.MAX_TITLE) return { error: "title-too-long" };
+      if (typeof item.body !== "string") return { error: "bad-body" };
+      if (item.body.length > this.MAX_BODY) return { error: "body-too-long" };
+      if (typeof item.worldId !== "string" || !WORLDS.has(item.worldId)) return { error: "bad-world" };
+      return { key, item };
+    },
+    /* بصمة المحتوى بعد توحيد الصيغة */
+    hashOf(item) {
+      return JSON.stringify({ title: item.title, body: item.body, worldId: item.worldId });
+    },
+    /* صف Supabase ← شكل العميل الذي يتوقعه عارض الأخبار (id + الحقول) */
+    toClient(row) {
+      return {
+        id: row.item_key,
+        title: row.payload.title,
+        body: row.payload.body || "",
+        worldId: row.world_id,
+        createdAt: row.created_at,
+      };
+    },
+  },
+};
+
+/* قراءة صفوف كارت (وعالم) من Supabase — card_key دائمًا من السجل، لا من العميل */
+async function sbGetCardItems(env, card, world) {
+  // limit=MAX_ITEMS+1: لو اتخطى الحد يوصل 501 ويقفل too_large بدل اقتطاع صامت (مراجعة المالك نقطة 4)
+  let q = "/card_items?select=item_key,world_id,payload,created_at,updated_at,updated_by,synced_at,source_update_time,content_hash"
+        + "&card_key=eq." + encodeURIComponent(card) + "&deleted_at=is.null&limit=" + (CARD_LIMITS.MAX_ITEMS + 1)
+        + "&order=created_at.desc.nullslast";
+  if (world !== null) q += "&world_id=eq." + encodeURIComponent(world);
+  const r = await sb(env, q);
+  if (!r.ok || !Array.isArray(r.data)) return { ok: false, status: r.status };
+  return { ok: true, rows: r.data };
+}
+async function sbGetCardSyncState(env, card, scope) {
+  const r = await sb(env, "/sync_state?select=*&card_key=eq." + encodeURIComponent(card) + "&scope=eq." + encodeURIComponent(scope) + "&limit=1");
+  if (!r.ok || !Array.isArray(r.data)) return null;
+  return r.data[0] || null;
+}
+async function sbSetCardSyncState(env, card, scope, patch) {
+  await sb(env, "/sync_state", {
+    method: "POST", prefer: "resolution=merge-duplicates,return=minimal",
+    body: { card_key: card, scope, ...patch },
+  });
+}
+async function sbUpsertCardItem(env, card, key, item, hash) {
+  const def = CARDS[card];
+  const r = await sb(env, "/rpc/upsert_card_item", {
+    method: "POST",
+    body: {
+      p_card_key: card, p_item_key: key, p_world_id: def.worldScoped ? item.worldId : null,
+      p_payload: def.hashOf ? JSON.parse(def.hashOf(item)) : item,
+      p_created_at: item.createdAt, p_updated_at: item.updatedAt, p_updated_by: item.updatedBy,
+      p_source_update_time: item.sourceUpdateTime, p_content_hash: hash,
+    },
+  });
+  if (!r.ok) return { ok: false, status: r.status };
+  return { ok: true, result: typeof r.data === "string" ? r.data : String(r.data) }; // applied | noop | stale_rejected
+}
+async function sbSoftDeleteCardItem(env, card, key) {
+  const r = await sb(env, "/rpc/soft_delete_card_item", { method: "POST", body: { p_card_key: card, p_item_key: key } });
+  return { ok: r.ok };
+}
+async function sbCountCardLive(env, card, world) {
+  let q = "/card_items?select=item_key&card_key=eq." + encodeURIComponent(card) + "&deleted_at=is.null&limit=" + CARD_LIMITS.MAX_ITEMS;
+  if (world !== null) q += "&world_id=eq." + encodeURIComponent(world);
+  const r = await sb(env, q);
+  return r.ok && Array.isArray(r.data) ? r.data.length : null;
+}
+
+/* Firestore: مستند واحد / قائمة مجموعة كاملة — لأي كارت مسجل */
+async function fsGetCardDoc(env, def, key, token) {
+  let r;
+  try {
+    r = await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${def.col}/${encodeURIComponent(key)}`, {
+      headers: { "Authorization": "Bearer " + token },
+    });
+  } catch (_) { return { status: "network" }; }
+  if (r.status === 404) {
+    let is404 = false;
+    try { const j = await r.json(); is404 = j && j.error && (j.error.status === "NOT_FOUND" || j.error.code === 404); } catch (_) { is404 = false; }
+    return is404 ? { status: "not_found" } : { status: "error", code: 404 };
+  }
+  if (!r.ok) return { status: "error", code: r.status };
+  try { return { status: "ok", doc: await r.json() }; } catch (_) { return { status: "error", code: r.status } ; }
+}
+/* استعلام منظم بفلتر worldId — قواعد Firestore للكروت العالمية (news...) تشترط قيد worldId في القراءة،
+   فالقائمة العارية ممنوعة حتى للمالك. النشر 3.0 الأول أثبت ذلك لايف (403 → firestore_incomplete). */
+async function fsQueryWorldPage(env, def, world, offset, token) {
+  let r;
+  try {
+    r = await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents:runQuery`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: def.col }],
+          where: { fieldFilter: { field: { fieldPath: "worldId" }, op: "EQUAL", value: { stringValue: world } } },
+          limit: CARD_LIMITS.FS_PAGE_SIZE,
+          offset,
+        },
+      }),
+    });
+  } catch (_) { return { status: "network" }; }
+  if (!r.ok) return { status: "error", code: r.status };
+  try { return { status: "ok", rows: await r.json() }; } catch (_) { return { status: "error", code: r.status }; }
+}
+
+async function fsListCardAll(env, def, token) {
+  // الكروت العالمية: تجميع عبر 16 استعلام worldId (القواعد تفرض القيد) — أي صفحة فاشلة ← complete=false
+  if (def.worldScoped) {
+    const docs = [];
+    for (const w of WORLDS) {
+      for (let page = 0; page < 50; page++) {
+        const q = await fsQueryWorldPage(env, def, w, page * CARD_LIMITS.FS_PAGE_SIZE, token);
+        if (q.status !== "ok") return { status: q.status === "network" ? "network" : "error", code: q.code || q.status, docs: [], complete: false };
+        const rows = Array.isArray(q.rows) ? q.rows : [];
+        for (const row of rows) if (row.document) docs.push(row.document);
+        if (rows.length < CARD_LIMITS.FS_PAGE_SIZE) break; // آخر صفحة لهذا العالم
+      }
+    }
+    return { status: "ok", docs, complete: true };
+  }
+  const docs = [];
+  let pageToken = null;
+  for (let page = 0; page < 50; page++) {
+    const u = new URL(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${def.col}`);
+    u.searchParams.set("pageSize", String(CARD_LIMITS.FS_PAGE_SIZE));
+    if (pageToken) u.searchParams.set("pageToken", pageToken);
+    let r;
+    try { r = await fetch(u.toString(), { headers: { "Authorization": "Bearer " + token } }); }
+    catch (_) { return { status: "network", docs: [], complete: false }; }
+    if (!r.ok) return { status: "error", code: r.status, docs: [], complete: false };
+    let j;
+    try { j = await r.json(); } catch (_) { return { status: "error", code: r.status, docs: [], complete: false }; }
+    for (const d of (j.documents || [])) docs.push(d);
+    pageToken = j.nextPageToken || null;
+    if (!pageToken) return { status: "ok", docs, complete: true };
+  }
+  return { status: "error", code: "too-many-pages", docs: [], complete: false };
+}
+
+const _cardCacheKey = (card, world) =>
+  new Request("https://bliss-cache.internal/v1/cards/" + card + "/content" + (world !== null ? "?world=" + world : ""));
+async function bustCardCache(card, world) {
+  try { await caches.default.delete(_cardCacheKey(card, world)); } catch (_) {}
+}
+
+/* GET /v1/cards/{card}/content?world= — القراءة العامة */
+async function handleCardContent(request, env, user, cards, card) {
+  const def = CARDS[card];
+  const allowed = cards[card] === "gateway" || (cards[card] === "gateway-owner" && user.sub === env.OWNER_UID);
+  if (!allowed) return err(request, env, 503, "disabled");
+
+  const url = new URL(request.url);
+  const world = def.worldScoped ? url.searchParams.get("world") : null;
+  if (def.worldScoped && (!world || !WORLDS.has(world))) return err(request, env, 400, "bad-world");
+
+  const cacheKey = _cardCacheKey(card, world);
+  const inm = request.headers.get("If-None-Match");
+  try {
+    const cached = await caches.default.match(cacheKey);
+    if (cached) {
+      const etag = cached.headers.get("ETag");
+      if (inm && etag && inm.split(",").map(s => s.trim()).includes(etag))
+        return new Response(null, { status: 304, headers: { ...corsHeaders(request, env), "ETag": etag, "Cache-Control": "max-age=" + CARD_LIMITS.CACHE_TTL_S, "X-Cache": "HIT", "X-Content-Type-Options": "nosniff" } });
+      const h = new Headers(cached.headers);
+      const co = corsHeaders(request, env);
+      for (const k in co) h.set(k, co[k]);
+      h.set("X-Cache", "HIT");
+      return new Response(cached.body, { status: 200, headers: h });
+    }
+  } catch (_) { /* الكاش أفضل جهد */ }
+
+  const [rowsR, state] = await Promise.all([sbGetCardItems(env, card, world), sbGetCardSyncState(env, card, world || "")]);
+  if (!rowsR.ok) return err(request, env, 502, "supabase_error");
+  const rows = rowsR.rows;
+  const expected = state && typeof state.expected_count === "number" ? state.expected_count : 0;
+  if (rows.length === 0 && expected > 0) return err(request, env, 502, "empty_unexpected");
+  if (rows.length > CARD_LIMITS.MAX_ITEMS) return err(request, env, 502, "too_large");
+
+  const items = rows.map(def.toClient);
+  const fingerprint = await sha256hex(rows.map(r => r.item_key + ":" + (r.content_hash || "")).join("|") + "#" + rows.length + "#" + (world || ""));
+  const etag = '"crd-' + fingerprint.slice(0, 24) + '"';
+  const meta = { complete: true, count: items.length, expected_count: expected, version: V, generatedAt: Date.now(), etag };
+  const body = JSON.stringify({ v: V, data: items, etag, ts: Date.now(), meta });
+  if (new TextEncoder().encode(body).length > CARD_LIMITS.MAX_RESP_BYTES) return err(request, env, 502, "too_large");
+
+  const headers = {
+    "Content-Type": "application/json", "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "max-age=" + CARD_LIMITS.CACHE_TTL_S, "ETag": etag, "X-Cache": "MISS",
+    ...corsHeaders(request, env),
+  };
+  if (inm && inm.split(",").map(s => s.trim()).includes(etag))
+    return new Response(null, { status: 304, headers });
+  const res = new Response(body, { status: 200, headers });
+  try { await caches.default.put(cacheKey, new Response(body, { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "max-age=" + CARD_LIMITS.CACHE_TTL_S, "ETag": etag, "X-Content-Type-Options": "nosniff" } })); } catch (_) {}
+  return res;
+}
+
+/* مزامنة مفتاح واحد لأي كارت مسجل */
+async function syncOneCard(env, card, key, token) {
+  const def = CARDS[card];
+  const got = await fsGetCardDoc(env, def, key, token);
+  if (got.status === "not_found") {
+    const del = await sbSoftDeleteCardItem(env, card, key);
+    if (!del.ok) return { key, action: "delete_failed" };
+    return { key, action: "deleted" };
+  }
+  if (got.status !== "ok") return { key, action: "firestore_error", code: got.code || got.status };
+  const parsed = def.decode(got.doc);
+  if (parsed.error) return { key, action: "invalid_shape", reason: parsed.error };
+  const hash = await sha256hex(def.hashOf(parsed.item));
+  const up = await sbUpsertCardItem(env, card, key, parsed.item, hash);
+  if (!up.ok) return { key, action: "supabase_error", code: up.status };
+  return { key, action: up.result, world: parsed.item.worldId || null };
+}
+
+/* POST /v1/cards/{card}/sync — المالك فقط */
+async function handleCardSync(request, env, user, card) {
+  const def = CARDS[card];
+  const url = new URL(request.url);
+  const len = Number(request.headers.get("Content-Length") || 0);
+  if (len > CARD_LIMITS.MAX_SYNC_BODY) return err(request, env, 413, "too_large");
+  let body = {};
+  const raw = await request.text();
+  if (raw.length > CARD_LIMITS.MAX_SYNC_BODY) return err(request, env, 413, "too_large");
+  if (raw) { try { body = JSON.parse(raw); } catch (_) { return err(request, env, 400, "bad-json"); } }
+  const token = /^Bearer (.+)$/.exec(request.headers.get("Authorization") || "")[1];
+
+  if (url.searchParams.get("all") === "1") {
+    const list = await fsListCardAll(env, def, token);
+    if (!list.complete) return err(request, env, 502, "firestore_incomplete");
+    const live = await sbCountCardLive(env, card, null);
+    if (list.docs.length === 0 && live !== null && live > 0 && url.searchParams.get("confirm") !== "1")
+      return err(request, env, 409, "confirm_required");
+    const seen = new Set();
+    const results = [];
+    const perWorld = {}; // عداد العوالم من مصدر الحقيقة (Firestore)
+    for (const d of list.docs) {
+      const key = decodeURIComponent((d.name || "").split("/").pop() || "");
+      seen.add(key);
+      const parsed = def.decode(d);
+      if (parsed.error) { results.push({ key, action: "invalid_shape", reason: parsed.error }); continue; }
+      if (def.worldScoped) perWorld[parsed.item.worldId] = (perWorld[parsed.item.worldId] || 0) + 1;
+      const hash = await sha256hex(def.hashOf(parsed.item));
+      const up = await sbUpsertCardItem(env, card, key, parsed.item, hash);
+      results.push({ key, action: up.ok ? up.result : "supabase_error" });
+    }
+    const rowsR = await sbGetCardItems(env, card, null);
+    if (rowsR.ok) {
+      for (const row of rowsR.rows) {
+        if (!seen.has(row.item_key)) {
+          const del = await sbSoftDeleteCardItem(env, card, row.item_key);
+          results.push({ key: row.item_key, action: del.ok ? "deleted_orphan" : "delete_failed" });
+        }
+      }
+    }
+    // حالة المزامنة لكل عالم (العوالم الفارغة تصفر أيضًا) + كاش كل عالم يُمسح
+    if (def.worldScoped) {
+      for (const w of WORLDS) {
+        await sbSetCardSyncState(env, card, w, { expected_count: perWorld[w] || 0, last_reconciled_at: new Date().toISOString(), status: "ok" });
+        await bustCardCache(card, w);
+      }
+    } else {
+      await sbSetCardSyncState(env, card, "", { expected_count: list.docs.length, last_reconciled_at: new Date().toISOString(), status: "ok" });
+      await bustCardCache(card, null);
+    }
+    return ok(request, env, { results, total: list.docs.length }, { complete: true, count: results.length, version: V, generatedAt: Date.now() });
+  }
+
+  const key = typeof body.key === "string" ? body.key : null;
+  if (!key) return err(request, env, 400, "missing-key");
+  const result = await syncOneCard(env, card, key, token);
+  if (result.action === "firestore_error") return err(request, env, 502, "firestore_error");
+  if (result.action === "invalid_shape") return err(request, env, 422, "invalid_shape");
+  if (result.action === "supabase_error" || result.action === "delete_failed") return err(request, env, 502, "supabase_error");
+  // حدّث عداد العالم المتأثر (أو عداد الكارت للكروت العامة) ثم امسح كاشه.
+  // في الحذف لا يعرف الطالب العالم أحيانًا: scope مجهول ← إعادة حساب ومسح لكل العوالم (لا قفلة فارغة كاذبة)
+  const scope = def.worldScoped ? (result.world || (body.world && WORLDS.has(body.world) ? body.world : null)) : "";
+  if (def.worldScoped && scope === null) {
+    for (const w of WORLDS) {
+      const c = await sbCountCardLive(env, card, w);
+      if (c !== null) await sbSetCardSyncState(env, card, w, { expected_count: c, status: "ok" });
+      await bustCardCache(card, w);
+    }
+  } else {
+    const count = await sbCountCardLive(env, card, def.worldScoped ? scope : null);
+    if (count !== null) await sbSetCardSyncState(env, card, scope, { expected_count: count, status: "ok" });
+    await bustCardCache(card, def.worldScoped ? scope : null);
+  }
+  return ok(request, env, { results: [result] }, { complete: true, count: 1, version: V, generatedAt: Date.now() });
+}
+
+/* مقارنة Firestore ↔ Supabase لأي كارت مسجل — مشتركة بين المصالحة والـ shadow */
+async function compareCard(env, card, token) {
+  const def = CARDS[card];
+  const list = await fsListCardAll(env, def, token);
+  if (!list.complete) return { ok: false, reason: "firestore_incomplete", code: list.code || list.status };
+  const rowsR = await sbGetCardItems(env, card, null);
+  if (!rowsR.ok) return { ok: false, reason: "supabase_error", code: rowsR.status };
+  const sbByKey = new Map(rowsR.rows.map(r => [r.item_key, r]));
+  const fsByKey = new Map();
+  const missing = [], stale = [], orphan = [];
+  let fsError = null;
+  for (const d of list.docs) {
+    const key = decodeURIComponent((d.name || "").split("/").pop() || "");
+    const parsed = def.decode(d);
+    if (parsed.error) { fsError = parsed.error; fsByKey.set(key, { error: parsed.error }); continue; }
+    const hash = await sha256hex(def.hashOf(parsed.item));
+    fsByKey.set(key, { item: parsed.item, hash });
+    const row = sbByKey.get(key);
+    if (!row) { missing.push(key); continue; }
+    if (row.content_hash !== hash) stale.push(key);
+  }
+  for (const row of rowsR.rows) if (!fsByKey.has(row.item_key)) orphan.push(row.item_key);
+  return {
+    ok: true, missing, stale, orphan,
+    counts: { firestore: fsByKey.size, supabase: rowsR.rows.length, missing: missing.length, stale: stale.length, orphan: orphan.length },
+    fsError, fsByKey,
+  };
+}
+
+/* GET /v1/cards/{card}/reconcile — فحص فقط */
+async function handleCardReconcile(request, env, user, card) {
+  const cmp = await compareCard(env, card, /^Bearer (.+)$/.exec(request.headers.get("Authorization") || "")[1]);
+  if (!cmp.ok) return err(request, env, 502, cmp.reason);
+  return ok(request, env, { missing: cmp.missing, stale: cmp.stale, orphan: cmp.orphan, counts: cmp.counts, fsShapeError: cmp.fsError },
+    { complete: true, count: cmp.counts.firestore, version: V, generatedAt: Date.now() });
+}
+
+/* POST /v1/cards/{card}/reconcile/fix — إصلاح يدوي بقرار المالك */
+async function handleCardReconcileFix(request, env, user, card) {
+  const def = CARDS[card];
+  const token = /^Bearer (.+)$/.exec(request.headers.get("Authorization") || "")[1];
+  const cmp = await compareCard(env, card, token);
+  if (!cmp.ok) return err(request, env, 502, cmp.reason);
+  const applied = [];
+  for (const key of [...cmp.missing, ...cmp.stale]) {
+    const f = cmp.fsByKey.get(key);
+    if (!f || f.error) continue;
+    const up = await sbUpsertCardItem(env, card, key, f.item, f.hash);
+    applied.push({ key, action: up.ok ? up.result : "supabase_error" });
+  }
+  for (const key of cmp.orphan) {
+    const del = await sbSoftDeleteCardItem(env, card, key);
+    applied.push({ key, action: del.ok ? "deleted_orphan" : "delete_failed" });
+  }
+  if (def.worldScoped) {
+    const perWorld = {};
+    for (const [, v] of cmp.fsByKey) if (v.item) perWorld[v.item.worldId] = (perWorld[v.item.worldId] || 0) + 1;
+    for (const w of WORLDS) {
+      await sbSetCardSyncState(env, card, w, { expected_count: perWorld[w] || 0, last_reconciled_at: new Date().toISOString(), status: "ok" });
+      await bustCardCache(card, w);
+    }
+  } else {
+    await sbSetCardSyncState(env, card, "", { expected_count: cmp.counts.firestore, last_reconciled_at: new Date().toISOString(), status: "ok" });
+    await bustCardCache(card, null);
+  }
+  return ok(request, env, { applied, before: cmp.counts }, { complete: true, count: applied.length, version: V, generatedAt: Date.now() });
+}
+
+/* GET /v1/cards/{card}/shadow — مقارنة وتسجيل أعداد فقط في shadow_log */
+async function handleCardShadow(request, env, user, card) {
+  const token = /^Bearer (.+)$/.exec(request.headers.get("Authorization") || "")[1];
+  const cmp = await compareCard(env, card, token);
+  const sourceErrors = { firestore: cmp.ok || cmp.reason !== "firestore_incomplete" ? 0 : 1, supabase: cmp.ok || cmp.reason !== "supabase_error" ? 0 : 1 };
+  const compared = cmp.ok ? cmp.counts.firestore : 0;
+  const mismatched = cmp.ok ? cmp.counts.missing + cmp.counts.stale + cmp.counts.orphan : 0;
+  const diffTypes = cmp.ok ? { missing: cmp.counts.missing, hash: cmp.counts.stale, orphan: cmp.counts.orphan } : null;
+  await sb(env, "/shadow_log", {
+    method: "POST", prefer: "return=minimal",
+    body: { card_key: card, compared, matched: compared - mismatched, mismatched, diff_types: diffTypes, source_errors: sourceErrors },
+  });
+  if (!cmp.ok) return err(request, env, 502, cmp.reason);
+  return ok(request, env, { compared, matched: compared - mismatched, mismatched, diff_types: diffTypes },
+    { complete: true, count: compared, version: V, generatedAt: Date.now() });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -529,11 +961,23 @@ export default {
       "POST /v1/admin/sync/instructions": 1, "GET /v1/admin/reconcile/instructions": 1,
       "POST /v1/admin/reconcile/instructions/fix": 1, "GET /v1/admin/shadow/instructions": 1,
     };
+    // المرحلة 3.0: مسارات عامة /v1/cards/{card}/{op} — الكارت لازم يكون مسجلًا في CARDS (news فقط الآن)
+    const cardM = /^\/v1\/cards\/([A-Za-z]+)\/(content|sync|reconcile|reconcile\/fix|shadow)$/.exec(url.pathname);
+    let cardRoute = null; // { card, op }
+    if (cardM) {
+      if (!CARDS[cardM[1]]) return err(request, env, 404, "unknown-card"); // مفتاح غير مسجل لا يصل قاعدة البيانات أبدًا
+      cardRoute = { card: cardM[1], op: cardM[2] };
+    }
     const routeKey = request.method + " " + url.pathname;
-    if (!ROUTES[routeKey]) {
+    if (!ROUTES[routeKey] && !cardRoute) {
       // محاولة إصلاح عبر GET مرفوضة صراحة (2.3ب): /fix موجود لكن POST فقط
       if (url.pathname === "/v1/admin/reconcile/instructions/fix") return err(request, env, 405, "method-not-allowed");
+      if (/^\/v1\/cards\/[A-Za-z]+\/reconcile\/fix$/.test(url.pathname)) return err(request, env, 405, "method-not-allowed");
       return err(request, env, 404, "not-found");
+    }
+    if (cardRoute) {
+      const need = { content: "GET", sync: "POST", reconcile: "GET", "reconcile/fix": "POST", shadow: "GET" }[cardRoute.op];
+      if (request.method !== need) return err(request, env, 405, "method-not-allowed");
     }
 
     // 4) التحقق من التوكن ثم حد المرحلة الثانية بحسب uid
@@ -545,7 +989,7 @@ export default {
     if (!rateLimit("uid:" + user.sub, 120)) return err(request, env, 429, "rate-limited");
 
     // مسارات الإدارة: المالك فقط (uid الثابت، يطابق isOwner() في القواعد)
-    const isAdmin = url.pathname.startsWith("/v1/admin/");
+    const isAdmin = url.pathname.startsWith("/v1/admin/") || (cardRoute && cardRoute.op !== "content");
     if (isAdmin) {
       if (user.sub !== env.OWNER_UID) return err(request, env, 403, "owner-only");
       if (!rateLimit("adm:" + user.sub, 60)) return err(request, env, 429, "rate-limited");
@@ -553,11 +997,16 @@ export default {
       if (routeKey === "GET /v1/admin/reconcile/instructions") return handleReconcile(request, env, user);
       if (routeKey === "POST /v1/admin/reconcile/instructions/fix") return handleReconcileFix(request, env, user);
       if (routeKey === "GET /v1/admin/shadow/instructions") return handleShadow(request, env, user);
+      if (cardRoute && cardRoute.op === "sync") return handleCardSync(request, env, user, cardRoute.card);
+      if (cardRoute && cardRoute.op === "reconcile") return handleCardReconcile(request, env, user, cardRoute.card);
+      if (cardRoute && cardRoute.op === "reconcile/fix") return handleCardReconcileFix(request, env, user, cardRoute.card);
+      if (cardRoute && cardRoute.op === "shadow") return handleCardShadow(request, env, user, cardRoute.card);
     }
 
     const cards = await readFlags(env);
 
     if (routeKey === "GET /v1/content/instructions") return handleInstructionsContent(request, env, user, cards);
+    if (cardRoute && cardRoute.op === "content") return handleCardContent(request, env, user, cards, cardRoute.card);
 
     // GET /v1/config — كروت عامة: يكفي توكن صالح لأي مستخدم مسجل (يطابق allow read: if isSignedIn())
     // تدرّج 2.5: قيمة gateway-owner تظهر "gateway" للمالك و"shadow" لغيره (بلا تغيير كود بين الخطوتين 3 و4)

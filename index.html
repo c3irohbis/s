@@ -3962,7 +3962,7 @@ function _forumLiveStop(key) {
   e.unsub = null; e.active = false; e.sig = null;
 }
 
-function _forumLiveStart(key, ctx) {
+async function _forumLiveStart(key, ctx) {
   const e = _forumLive[key];
   _forumLiveStop(key);                       // أي مستمع سابق يتفصل قبل الجديد
   e.active = true; e.sig = ctx.sig;
@@ -3975,6 +3975,32 @@ function _forumLiveStart(key, ctx) {
   if (e.dataSig !== ctx.sig || !e.rendered) { list.innerHTML = `<div class="spinner"></div>`; e.rendered = false; }
   // عالم غير محدد (مثلاً أونر لسه ما اختارش) → قائمة فاضية زي السلوك القديم، من غير مستمع
   if (!ctx.world) { list.innerHTML = _FORUM_EMPTY_HTML; e.rendered = true; e.dataSig = ctx.sig; return; }
+
+  // بوابة بليس (مرحلة 3.0 — كامنة خلف علم KV): الكروت المسجلة في js/card-gateway.js تجرّب البوابة أولًا،
+  // وأي فشل أو غياب الوضع "gateway" ← المستمع الحالي بالأسفل كما هو بلا أي تغيير.
+  if (window.CardGateway && window.CardGateway.isRegistered(key)) {
+    const renderGwDocs = (docs) => {
+      if (gen !== e.gen || window.currentUser?.uid !== ctx.uid || _forumLiveCtx().sig !== ctx.sig) return;
+      let els = [];
+      try { els = docs.map(d => e.render(d)); }
+      catch (err) {
+        console.error(err);
+        list.innerHTML = `<div class="empty-state">خطأ في التحميل</div>`;
+        e.rendered = false;
+        return;
+      }
+      list.innerHTML = "";
+      if (!docs.length) { list.innerHTML = _FORUM_EMPTY_HTML; }
+      else els.forEach(el => { if (el) list.appendChild(el); });
+      e.rendered = true; e.dataSig = ctx.sig;
+    };
+    let served = false;
+    try { served = await window.CardGateway.serveCard(key, ctx, renderGwDocs); }
+    catch (err) { console.error(err); served = false; }
+    if (gen !== e.gen) return;                 // الكارت اتقفل/اتبدل أثناء الانتظار (والرسم نفسه محروس بالجيل والبصمة)
+    if (served) return;                        // خُدم من البوابة: بلا مستمع Firestore
+    // وإلا: يكمل للمستمع الحالي كما هو
+  }
 
   const mk    = _forumLiveMarkerKey(ctx, e.col);
   const still = () => gen === e.gen && window.currentUser?.uid === ctx.uid && _forumLiveCtx().sig === ctx.sig;
@@ -4029,6 +4055,9 @@ function _forumLiveSync() {
   Object.keys(_forumLive).forEach(key => {
     const e = _forumLive[key];
     if (!(canRun && _forumLiveShown(e))) { _forumLiveStop(key); e.failedSig = null; return; }
+    // D9=A (مراجعة المالك نقطة 1): الكارت المفتوح لا يُعاد جلبه أبدًا — لا هنا ولا عبر أي استدعاء متكرر
+    // (IntersectionObserver/visibilitychange أثناء الفتح). الفتح/الرجوع الحقيقي يمر بـ _forumLiveStop
+    // ثم _forumLiveStart أدناه، وserveCard يجلب جديدًا عندها فقط.
     if (e.active && e.sig === ctx.sig) return;                 // شغّال لنفس الحساب والعالم → ما نكرّرش
     if (!e.active && e.failedSig === ctx.sig) return;          // فشل لنفس السياق → إعادة المحاولة بعد الإخفاء/الفتح التالي
     _forumLiveStart(key, ctx);
@@ -4109,6 +4138,7 @@ async function deleteItem(col, id, cardEl) {
     );
 
     toast("تم الحذف");
+    try { window.CardGateway?.syncAfterWrite(col, id, (typeof window.activeWorldContext === "function") ? window.activeWorldContext() : null); } catch(_) {} // مزامنة البوابة (كامنة) — لا تمنع الحذف أبدًا
   } catch(e) { toast("فشل الحذف", "error"); console.error(e); }
 }
 window.deleteItem = deleteItem;
@@ -4127,8 +4157,10 @@ function makeAdder(btnId, getFields, colName, successMsg, reloadFn) {
     const fields = getFields();
     if (!fields) return;
     let saved = false;
+    let _newId = null;
     try {
-      await addDoc(collection(db, colName), { ...fields, worldId: _worldId, createdAt: serverTimestamp() });
+      const _ref = await addDoc(collection(db, colName), { ...fields, worldId: _worldId, createdAt: serverTimestamp() });
+      _newId = _ref && _ref.id;
       saved = true;
     } catch(e) {
       toast("فشلت الإضافة", "error");
@@ -4137,6 +4169,7 @@ function makeAdder(btnId, getFields, colName, successMsg, reloadFn) {
     }
     if (saved) {
       toast(successMsg, "success");
+      try { window.CardGateway?.syncAfterWrite(colName, _newId, _worldId); } catch(_) {} // مزامنة البوابة (كامنة) — لا تمنع الإضافة أبدًا
       try { reloadFn(); } catch(_) {}
       // FCM: notify all users
       const _nt = { news: "📰 خبر جديد", lectures: "📚 محاضرة جديدة", exams: "📅 امتحان جديد", sections: "🏫 سكشن جديد" };
@@ -7053,6 +7086,7 @@ try { window._listenPinnedMsg?.(); } catch(e) {}
 
 <div id="instructions-app-root" aria-label="تعليمات" role="dialog"></div>
 <script src="js/instructions.js?v=bliss-phase2-4" defer></script>
+<script src="js/card-gateway.js?v=bliss-phase3-0" defer></script>
 <script src="js/account-archive.js" defer></script>
 <script src="js/tuition-fees.js" defer></script>
 <script src="js/expenses.js?v=local-1" defer></script>
