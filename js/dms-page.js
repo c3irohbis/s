@@ -367,15 +367,25 @@ window._dmsStartListeners = function() {
   const gen = ++_dmsGen;
 
   // cache أسماء المستخدمين لتجنب getDoc متكررة
-  const _nameCache = {};
-  async function _getUser(uid) {
-    if (_nameCache[uid]) return _nameCache[uid];
-    try {
-      const s = await getDoc(doc(window.db, "users", uid));
-      const u = s.exists() ? { name: s.data().name||"مستخدم", photo: s.data().photo||"", role: s.data().role||"user", gender: s.data().gender||"" } : { name:"مستخدم", photo:"", role:"user", gender:"" };
-      _nameCache[uid] = u;
-      return u;
-    } catch(e) { return { name:"مستخدم", photo:"", role:"user" }; }
+  const _nameCache = {}, _namePending = {};
+  async function _getUser(peerUid) {
+    if (_namePending[peerUid]) return _namePending[peerUid];
+    _namePending[peerUid] = (async () => {
+      try {
+        let data;
+        if (window._getUserProfile) data = await window._getUserProfile(peerUid);
+        else {
+          if (_nameCache[peerUid]) return _nameCache[peerUid];
+          const s = await getDoc(doc(window.db, "users", peerUid));
+          data = s.exists() ? s.data() : {};
+        }
+        const u = {name:data.name||"مستخدم",photo:data.photo||"",role:data.role||"user",gender:data.gender||""};
+        if (gen === _dmsGen) _nameCache[peerUid] = u;
+        return u;
+      } catch(e) { return {name:"مستخدم",photo:"",role:"user",gender:""}; }
+      finally { delete _namePending[peerUid]; }
+    })();
+    return _namePending[peerUid];
   }
 
   // الشات العام

@@ -3151,27 +3151,27 @@ let _allUsersCacheTs = 0;
 const _userFetchQ  = {};  // uid → Promise (لمنع التحميل المتوازي)
 
 async function _getUser(uid) {
+  const actorUid = window.currentUser?.uid || null;
+  const fallback = () => ({name:"مستخدم",photo:""});
+  if (!actorUid || !uid) return fallback();
   const cached = _userCache[uid];
   if (cached && (Date.now() - cached.ts < CACHE_TTL_MS)) return cached.data;
-
-  // منع طلبات متوازية لنفس الـ uid
-  if (_userFetchQ[uid]) return _userFetchQ[uid];
-
-  _userFetchQ[uid] = (async () => {
+  const key = JSON.stringify([actorUid,uid]);
+  if (_userFetchQ[key]) return _userFetchQ[key];
+  const pending = (async () => {
     try {
       const snap = await getDoc(doc(db, "users", uid));
-      const data = snap.exists() ? snap.data() : { name: "مستخدم", photo: "" };
+      if (window.currentUser?.uid !== actorUid) return fallback();
+      const data = snap.exists() ? snap.data() : fallback();
       _userCache[uid] = { data, ts: Date.now() };
       return data;
-    } catch(e) {
-      return { name: "مستخدم", photo: "" };
-    } finally {
-      delete _userFetchQ[uid];
-    }
+    } catch(e) { return fallback(); }
+    finally { delete _userFetchQ[key]; }
   })();
-
-  return _userFetchQ[uid];
+  _userFetchQ[key] = pending;
+  return pending;
 }
+window._getUserProfile = _getUser;
 
 async function _getAllUsers() {
   if (_allUsersCache && (Date.now() - _allUsersCacheTs < CACHE_TTL_MS)) {
@@ -6361,7 +6361,7 @@ try { window._listenPinnedMsg?.(); } catch(e) {}
 <script type="module" src="js/poll.js?v=read-head-1"></script>
 <script type="module" src="js/members-list.js?v=scoped-3"></script>
 <script type="module" src="js/mention.js?v=scoped-3"></script>
-<script type="module" src="js/dms-page.js?v=5"></script>
+<script type="module" src="js/dms-page.js?v=profile-6"></script>
 <script type="module" src="js/dm-extras.js?v=unread-anchor-1"></script>
 <script src="js/chat-presence-text.js?v=2"></script>
 <script src="js/calls.js?v=5" defer></script>
