@@ -16,12 +16,12 @@ importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
 firebase.initializeApp({
-  apiKey:            "REMOVED-OLD-CONFIG",
-  authDomain:        "REMOVED-OLD-CONFIG",
-  projectId:         "REMOVED-OLD-CONFIG",
-  storageBucket:     "REMOVED-OLD-CONFIG",
-  messagingSenderId: "REMOVED-OLD-CONFIG",
-  appId:             "REMOVED-OLD-CONFIG"
+  apiKey:            "YOUR_FIREBASE_API_KEY",
+  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId:         "YOUR_PROJECT_ID",
+  storageBucket:     "YOUR_PROJECT_ID.firebasestorage.app",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId:             "YOUR_FIREBASE_APP_ID"
 });
 
 const messaging = firebase.messaging();

@@ -1,12 +1,12 @@
 /* ==========================================================================
-   /livekit-token — يُضاف إلى الـ Cloudflare Worker الحالي (falling-sea-c753)
+   /livekit-token — يُضاف إلى الـ Cloudflare Worker الحالي (YOUR-WORKER)
    ليس Worker جديدًا ولا يلمس مسار FCM/Cron. الملف مرجع للصق فقط، لا يُحمّل في المتصفح.
 
    الأسرار (Cloudflare → Worker → Settings → Variables/Secrets، وليس في الكود):
      LIVEKIT_API_KEY      (Secret)
      LIVEKIT_API_SECRET   (Secret)
      LIVEKIT_URL          مثال: wss://YOUR-PROJECT.livekit.cloud
-     FIREBASE_PROJECT_ID  = REMOVED-OLD-CONFIG   (غالبًا موجود عندك بالفعل)
+     FIREBASE_PROJECT_ID  = YOUR_PROJECT_ID   (غالبًا موجود عندك بالفعل)
      OWNER_UID            = dKTc7vqFNGO7vqamubap5dKnn7z1  (بدونه لا توجد صلاحية مالك في المكالمات)
 
    الربط داخل fetch() الحالي — سطران فقط قبل منطق FCM الحالي:

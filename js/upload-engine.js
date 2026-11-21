@@ -7,7 +7,7 @@ function uploadToCloudinaryWithProgress(file, onProgress) {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("upload_preset", "university_upload");
+    formData.append("upload_preset", "YOUR_UPLOAD_PRESET");
     const xhr = new XMLHttpRequest();
     let startTime = Date.now();
     let lastLoaded = 0;
@@ -38,7 +38,7 @@ function uploadToCloudinaryWithProgress(file, onProgress) {
     });
     xhr.addEventListener("error", () => reject(new Error("Network error")));
     xhr.addEventListener("abort", () => reject(new Error("Aborted")));
-    xhr.open("POST", "https://api.cloudinary.com/v1_1/dnbvvfita/auto/upload");
+    xhr.open("POST", "https://api.cloudinary.com/v1_1/YOUR_CLOUDINARY_CLOUD_NAME/auto/upload");
     xhr.send(formData);
   });
 }

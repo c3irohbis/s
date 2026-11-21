@@ -2046,12 +2046,12 @@ import { initFCM, showForegroundNotif, fcmSupported } from "./js/notif-permissio
    CONFIG & INIT
 ══════════════════════════════════════════ */
 const firebaseConfig = {
-  apiKey:            "REMOVED-OLD-CONFIG",
-  authDomain:        "REMOVED-OLD-CONFIG",
-  projectId:         "REMOVED-OLD-CONFIG",
-  storageBucket:     "REMOVED-OLD-CONFIG",
-  messagingSenderId: "REMOVED-OLD-CONFIG",
-  appId:             "REMOVED-OLD-CONFIG"
+  apiKey:            "YOUR_FIREBASE_API_KEY",
+  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId:         "YOUR_PROJECT_ID",
+  storageBucket:     "YOUR_PROJECT_ID.firebasestorage.app",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId:             "YOUR_FIREBASE_APP_ID"
 };
 
 const OWNER_UID = "dKTc7vqFNGO7vqamubap5dKnn7z1";
@@ -2128,7 +2128,7 @@ async function _sendNotification(recipientUid, title, body, data) {
     });
     try {
       const idToken = await currentUser.getIdToken();
-      await fetch("https://falling-sea-c753.mrn57907.workers.dev/", {
+      await fetch("https://YOUR-WORKER.example.workers.dev/", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
         body: JSON.stringify({ docId: docRef.id }),
@@ -2332,9 +2332,9 @@ async function uploadToCloudinary(file) {
   if (file.type.startsWith("video/")) throw new Error("رفع الفيديوهات غير مسموح");
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("upload_preset", "university_upload");
+  formData.append("upload_preset", "YOUR_UPLOAD_PRESET");
   const response = await fetch(
-    "https://api.cloudinary.com/v1_1/dnbvvfita/auto/upload",
+    "https://api.cloudinary.com/v1_1/YOUR_CLOUDINARY_CLOUD_NAME/auto/upload",
     { method: "POST", body: formData }
   );
   const data = await response.json();
