@@ -150,11 +150,11 @@
       return;
     }
     _listeningWorldId = _w;
-    import(_FB).then(function (mod) {
+    import("./schedule-repository.js?v=1").then(function (mod) {
       if (myGen !== _gen) return; // جيل الحالة اتغيّر أثناء تحميل الموديول — تجاهل النتيجة
       try {
         var _worldId = _w;
-        _unsub = mod.onSnapshot(mod.query(mod.collection(window.db, COL), mod.where("worldId", "==", _worldId)), function (snap) {
+        _unsub = mod.subscribeSchedule(window.db, _worldId, _authUid, function (snap) {
           if (myGen !== _gen) return; // ✅ تجاهل أي callback قديم وصل بعد Logout/تغيير حساب/عالم
           // ✅ World Isolation: نفس مصدر العالم الموحّد — activeWorldContext(). لا تنبيه من عالم آخر.
           var _worldId = (typeof window.activeWorldContext === "function") ? window.activeWorldContext() : null;

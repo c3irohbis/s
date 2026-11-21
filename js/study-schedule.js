@@ -87,6 +87,7 @@
   let _lectures = [];      // كل المحاضرات (زي ما هي في Firestore)
   let _draft = null;       // نموذج الإضافة/التعديل
   let _loaded = false;
+  let _loadGeneration = 0;
   let _attLink = null;     // attendanceSettings/{worldId}.useStudySchedule (null = غير معروف/غير متاح → الصف مخفي)
   let _attLinkWid = null;  // العالم الذي تخصه قيمة _attLink (لو تغيّر العالم النشط يُخفى الصف ولا يُكتب شيء)
 
@@ -127,6 +128,7 @@
      تحميل البيانات
   ───────────────────────────────────────── */
   async function _load() {
+    const generation = ++_loadGeneration;
     const body = _body();
     if (body) body.innerHTML = `<div class="ss-loading"><div class="ss-spin"></div></div>`;
     try {
@@ -134,13 +136,18 @@
       // ✅ World Isolation: activeWorldContext() هو المصدر الوحيد للعالم للجميع (بما فيهم الأونر).
       // عناصر بلا worldId (قديمة) لا تُفترض تابعة لأي عالم، فتُستبعد من الجميع بلا استثناء.
       const _worldId = (typeof window.activeWorldContext === "function") ? window.activeWorldContext() : null;
-      const snap = await getDocs(query(collection(db, COL), where("worldId", "==", _worldId)));
+      const uid = window.currentUser?.uid;
+      const { getSchedule } = await import("./schedule-repository.js?v=1");
+      const snap = await getSchedule(db, _worldId, uid);
+      if (generation !== _loadGeneration || uid !== window.currentUser?.uid || _worldId !== _curWid()) return;
       _lectures = [];
       snap.forEach((d) => { const data = d.data(); if (_worldId && data.worldId === _worldId) _lectures.push({ id: d.id, ...data }); });
       _loaded = true;
       await _loadAttLink();
+      if (generation !== _loadGeneration || uid !== window.currentUser?.uid || _worldId !== _curWid()) return;
       _renderHome();
     } catch (e) {
+      if (generation !== _loadGeneration) return;
       if (body) body.innerHTML = `<div class="ss-empty"><div class="ss-empty-title">تعذّر تحميل الجدول الدراسي</div></div>`;
     }
   }
@@ -529,7 +536,8 @@
     root.classList.add("ss-open");
     root.style.display = "flex";
     _buildShell();
-    if (_loaded) _renderHome(); else _load();
+    // Reuse the active reminder snapshot, not this module's potentially old array.
+    _load();
     if (_loaded && _isAdmin() && _attLinkWid !== _curWid()) _loadAttLink().then(_renderHome); // تغيّر العالم النشط: أعد قراءة حالة الربط له
   };
 

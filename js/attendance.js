@@ -1,3 +1,4 @@
+import { getSchedule } from "./schedule-repository.js?v=1";
 /* ══════════════════════════════════════════════════════════════════
    js/attendance.js — نظام الحضور والغياب (ملف مستقل بالكامل)
    ══════════════════════════════════════════════════════════════════
@@ -85,7 +86,7 @@ function _buildStudyDay(lectures) {
 async function _loadScheds(wid, linked) {
   const out = {};
   if (linked) {
-    const snap = await getDocs(query(collection(_db(), "studySchedule"), where("worldId", "==", wid)));
+    const snap = await getSchedule(_db(), wid);
     const byDay = {};
     snap.forEach(d => { const l = d.data(); if (l.worldId === wid) (byDay[l.day] = byDay[l.day] || []).push(l); }); // عزل العالم
     DAY_ORDER.forEach(wd => { out[wd] = _buildStudyDay(byDay[_WEEKDAY_TO_SS_KEY[wd]] || []); });
