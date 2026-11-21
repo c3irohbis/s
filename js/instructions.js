@@ -37,8 +37,8 @@
   }
 
   const COL           = "instructions";
-  const CLOUD_NAME    = "YOUR_CLOUDINARY_CLOUD_NAME";
-  const UPLOAD_PRESET = "YOUR_UPLOAD_PRESET";
+  const CLOUD_NAME    = "dnbvvfita";
+  const UPLOAD_PRESET = "university_upload";
   const MAX_IMG_MB    = 10;
   const MAX_BLOCKS    = 60;
   const MAX_TEXT      = 5000;

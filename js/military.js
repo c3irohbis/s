@@ -35,8 +35,8 @@
      ملاحظة: بدون قيد منع الفيديو الموجود في دالة الشات uploadToCloudinary،
      لأن هذه المكتبة مخصصة لرفع الفيديوهات التعليمية عمدًا
   ───────────────────────────────────────── */
-  const CLOUD_NAME     = "YOUR_CLOUDINARY_CLOUD_NAME";
-  const UPLOAD_PRESET  = "YOUR_UPLOAD_PRESET";
+  const CLOUD_NAME     = "dnbvvfita";
+  const UPLOAD_PRESET  = "university_upload";
 
   function _detectType(file) {
     const t = file.type || "";
