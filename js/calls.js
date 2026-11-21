@@ -12,7 +12,7 @@
   if (window.BisCalls) return;
 
   var TOKEN_URL = window.BIS_LIVEKIT_TOKEN_URL ||
-    "https://YOUR-WORKER.example.workers.dev/livekit-token";
+    "https://bis-calls.cairohbis.workers.dev/livekit-token";
   var SDK_URL = "https://cdn.jsdelivr.net/npm/livekit-client@2.22.4/dist/livekit-client.umd.js";
 
   var lkRoom = null, active = false, starting = false, timerId = null, t0 = 0, audioEls = {}, callUid = null;
