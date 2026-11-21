@@ -268,6 +268,7 @@
   async function _startListener() {
     if (_unsub) return;
     const cards = await _gwConfig(); // null أو غياب المفتاح ← firebase
+    if (!_gwIsOpen()) return;      // أُغلق الكارت أثناء جلب الإعداد: لا مستمع
     const mode = (cards && cards.instructions) || "firebase";
     _gwMode = mode;
     if (mode === "gateway") {
