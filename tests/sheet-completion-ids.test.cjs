@@ -7,3 +7,16 @@ test('Sheetaty reads only the viewed subject completion IDs in batches of 30 and
  await ctx.window.SheetatyModule._openSubject('s');assert.equal(queries.length,5);assert.equal(renders,2);
  fns.getDocs=async()=>{uid='other';return{docs:sheets}};await ctx.window.SheetatyModule._openSubject('s');assert.equal(renders,2);
 });
+
+test('completion batches keep offline absences retryable and propagate errors', async()=>{
+ const ctx={window:{SheetatyModule:{}},_subjectGeneration:0};vm.createContext(ctx);vm.runInContext(code,ctx);
+ let calls=0;const fns={db:{},collection:(db,p)=>p,query:(...x)=>x,where:(...x)=>x,documentId:()=> '__name__',getDocs:async()=>{calls++;return{metadata:{fromCache:true},forEach:()=>{}}}};
+ const result=await ctx._loadCompletionIds(fns,'me',['a','b']);assert.equal(result.length,1);assert.equal(result[0].snap.metadata.fromCache,true);assert.equal(calls,1);
+ fns.getDocs=async()=>{throw Error('offline')};await assert.rejects(ctx._loadCompletionIds(fns,'me',['a']),/offline/);
+ assert.match(code,/if\(!snap.metadata\?\.fromCache\)_knownCompletionIds.add\(id\)/);
+});
+test('failed completion write from previous account cannot roll back new account state',async()=>{
+ const start=s.indexOf('  window.SheetatyModule._toggleDone ='),end=s.indexOf('  window.SheetatyModule._newSubject =',start);
+ let uid='old';const ctx={window:{SheetatyModule:{}},_uid:()=>uid,_completions:{},_renderSubject:()=>{},_fs:async()=>({db:{},doc:()=>({}),serverTimestamp:()=>null,setDoc:async()=>{uid='new';ctx._completions={newState:true};throw Error('failed')}})};
+ vm.createContext(ctx);vm.runInContext(s.slice(start,end),ctx);await ctx.window.SheetatyModule._toggleDone('a','s');assert.deepEqual(ctx._completions,{newState:true});
+});
