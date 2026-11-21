@@ -20,6 +20,7 @@ const V = 1;
 // الكروت المعروفة (مفاتيح forum-badges). الافتراضي لأي كارت: firebase
 const CARD_KEYS = ["news","lectures","exams","sections","studySchedule","sheets","records","lostFound","military","instructions","tuition"];
 const VALID_MODES = new Set(["firebase","shadow","gateway"]);
+const OWNER_PREVIEW = "gateway-owner"; // قيمة KV: بوابة للمالك فقط، وshadow للباقين (تدرّج 2.5)
 
 /* ── أدوات base64url ── */
 const b64uToBytes = (s) => {
@@ -118,7 +119,7 @@ async function readFlags(env) {
     try { raw = JSON.parse(env.FLAGS_DEFAULT || "{}"); } catch (_) { raw = {}; }
   }
   const cards = {};
-  for (const k of CARD_KEYS) cards[k] = VALID_MODES.has(raw[k]) ? raw[k] : "firebase";
+  for (const k of CARD_KEYS) cards[k] = (VALID_MODES.has(raw[k]) || raw[k] === OWNER_PREVIEW) ? raw[k] : "firebase";
   return cards;
 }
 
@@ -298,8 +299,9 @@ function rowToClient(row) {
 
 /* مسار القراءة: GET /v1/content/instructions */
 async function handleInstructionsContent(request, env, user, cards) {
-  // 2.7/4: الكارت لازم يكون gateway وإلا 503 disabled (firebase وshadow يعرضان Firestore)
-  if (cards.instructions !== "gateway") return err(request, env, 503, "disabled");
+  // 2.7/4: الكارت لازم يكون gateway (أو gateway-owner مع طالب هو المالك) وإلا 503 disabled
+  const allowed = cards.instructions === "gateway" || (cards.instructions === "gateway-owner" && user.sub === env.OWNER_UID);
+  if (!allowed) return err(request, env, 503, "disabled");
 
   const cacheKey = new Request("https://bliss-cache.internal/v1/content/instructions");
   const inm = request.headers.get("If-None-Match");
@@ -553,12 +555,15 @@ export default {
     if (routeKey === "GET /v1/content/instructions") return handleInstructionsContent(request, env, user, cards);
 
     // GET /v1/config — كروت عامة: يكفي توكن صالح لأي مستخدم مسجل (يطابق allow read: if isSignedIn())
-    // ETag لحالة المجموعة + دعم If-None-Match ← 304
-    const etag = '"cfg-' + (await sha256hex(JSON.stringify(cards))).slice(0, 24) + '"';
+    // تدرّج 2.5: قيمة gateway-owner تظهر "gateway" للمالك و"shadow" لغيره (بلا تغيير كود بين الخطوتين 3 و4)
+    const view = { ...cards };
+    for (const k of CARD_KEYS) if (view[k] === OWNER_PREVIEW) view[k] = (user.sub === env.OWNER_UID) ? "gateway" : "shadow";
+    // ETag لحالة المجموعة + دعم If-None-Match ← 304 (لكل مستخدم: البصمة تشمل هوية المالك)
+    const etag = '"cfg-' + (await sha256hex(JSON.stringify(view) + (user.sub === env.OWNER_UID ? ":o" : ""))).slice(0, 24) + '"';
     const cacheH = { "Cache-Control": "max-age=60", "ETag": etag };
     const inm = request.headers.get("If-None-Match");
     if (inm && inm.split(",").map(s => s.trim()).includes(etag))
       return new Response(null, { status: 304, headers: { ...corsHeaders(request, env), ...cacheH } });
-    return ok(request, env, { cards }, { complete: true, count: CARD_KEYS.length, version: V, generatedAt: Date.now(), etag }, cacheH);
+    return ok(request, env, { cards: view }, { complete: true, count: CARD_KEYS.length, version: V, generatedAt: Date.now(), etag }, cacheH);
   },
 };
