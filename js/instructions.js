@@ -87,12 +87,15 @@
     return true;
   }
 
+  function _gwIsOpen() { const r = _root(); return !!(r && r.classList.contains("instructions-open")); }
+
   function _gwRenderFromDocs() {
+    if (!_gwIsOpen()) return; // الكارت أُغلق أثناء الطلب: لا رسم ولا بدء مستمع
     if (_view === "list") _renderList();
     else if (_view === "read") { if (_docs[_curKey]) _renderRead(); else _goList(); }
   }
 
-  function _gwToFirebase() { _gwMode = "firebase"; _fsStart(); }
+  function _gwToFirebase() { _gwMode = "firebase"; if (_gwIsOpen()) _fsStart(); }
 
   async function _gwFetch(force) {
     if (_gwInflight) return _gwInflight;
