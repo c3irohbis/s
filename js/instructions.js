@@ -58,7 +58,13 @@
   let _gwVisBound = false;
   let _gwMode     = null;     // "gateway" عندما يعمل مسار البوابة
 
-  async function _gwToken() { return await window.currentUser.getIdToken(); }
+  async function _gwToken() {
+    // getIdToken نفسها قد تعلّق بلا نهاية (ملاحظة المالك ب) ← سباق مع مهلة
+    return await Promise.race([
+      window.currentUser.getIdToken(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("token-timeout")), GW_TIMEOUT)),
+    ]);
+  }
 
   async function _gwConfig() {
     try {
@@ -100,9 +106,10 @@
     else if (_view === "read") { if (_docs[_curKey]) _renderRead(); else _goList(); }
   }
 
-  function _gwTrip() { try { sessionStorage.setItem("gwDown", String(Date.now())); } catch (_) {} }
-  function _gwDown() { try { const t = +sessionStorage.getItem("gwDown") || 0; return t > 0 && Date.now() - t < GW_DOWN_TTL; } catch (_) { return false; } }
-  function _gwUp()   { try { sessionStorage.removeItem("gwDown"); } catch (_) {} }
+  const GW_CARD = "instructions"; // مفتاح القاطع لكل كارت على حدة (ملاحظة المالك أ): فشل كارت لا يُسقط الباقي
+  function _gwTrip() { try { sessionStorage.setItem("gwDown:" + GW_CARD, String(Date.now())); } catch (_) {} }
+  function _gwDown() { try { const t = +sessionStorage.getItem("gwDown:" + GW_CARD) || 0; return t > 0 && Date.now() - t < GW_DOWN_TTL; } catch (_) { return false; } }
+  function _gwUp()   { try { sessionStorage.removeItem("gwDown:" + GW_CARD); } catch (_) {} }
 
   function _gwToFirebase() { _gwTrip(); _gwMode = "firebase"; if (_gwIsOpen()) _fsStart(); }
 

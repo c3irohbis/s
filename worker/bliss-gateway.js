@@ -310,7 +310,7 @@ async function handleInstructionsContent(request, env, user, cards) {
     if (cached) {
       const etag = cached.headers.get("ETag");
       if (inm && etag && inm.split(",").map(s => s.trim()).includes(etag))
-        return new Response(null, { status: 304, headers: { ...corsHeaders(request, env), "ETag": etag, "Cache-Control": "max-age=" + INSTR.CACHE_TTL_S, "X-Cache": "HIT" } });
+        return new Response(null, { status: 304, headers: { ...corsHeaders(request, env), "ETag": etag, "Cache-Control": "max-age=" + INSTR.CACHE_TTL_S, "X-Cache": "HIT", "X-Content-Type-Options": "nosniff" } });
       // Headers لا تُفرد بالـspread ({...cached.headers} = {})؛ تُنسخ بـnew Headers وإلا ضاعت ETag/Cache-Control عن إصابات الكاش
       const h = new Headers(cached.headers);
       const co = corsHeaders(request, env);
@@ -346,7 +346,7 @@ async function handleInstructionsContent(request, env, user, cards) {
   if (inm && inm.split(",").map(s => s.trim()).includes(etag))
     return new Response(null, { status: 304, headers });
   const res = new Response(body, { status: 200, headers });
-  try { await caches.default.put(cacheKey, new Response(body, { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "max-age=" + INSTR.CACHE_TTL_S, "ETag": etag } })); } catch (_) {}
+  try { await caches.default.put(cacheKey, new Response(body, { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "max-age=" + INSTR.CACHE_TTL_S, "ETag": etag, "X-Content-Type-Options": "nosniff" } })); } catch (_) {}
   return res;
 }
 
