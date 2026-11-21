@@ -24,6 +24,13 @@
   const core = window.__LF.core;
 
   let _unsubQueue = null;
+  let _generation = 0;
+  function stop() {
+    ++_generation;
+    if (_unsubQueue) { try { _unsubQueue(); } catch (e) {} _unsubQueue = null; }
+  }
+  core.registerUnsubscribe(stop);
+
 
   /* ─────────────────────────────────────────
      الدخول من core.switchView("admin")
@@ -50,13 +57,16 @@
 
     const listEl = container.querySelector(".lf-admin-queue");
 
+    const generation = ++_generation;
     let fs;
     try {
       fs = await core.getFS();
     } catch (e) {
+      if (generation !== _generation) return;
       renderError(listEl, "تعذر الاتصال بقاعدة البيانات");
       return;
     }
+    if (generation !== _generation || document.hidden) return;
     const { db, collection, query, where, orderBy, onSnapshot } = fs;
 
     const q = query(
@@ -77,9 +87,7 @@
       }
     );
 
-    core.registerUnsubscribe(() => {
-      if (_unsubQueue) { _unsubQueue(); _unsubQueue = null; }
-    });
+
   }
 
   function renderQueue(listEl, docs) {
@@ -262,5 +270,5 @@
       </div>`;
   }
 
-  window.__LF.admin = { render };
+  window.__LF.admin = { stop, render };
 })();

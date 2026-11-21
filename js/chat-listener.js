@@ -25,8 +25,14 @@ let _oldestDoc     = null;
 let _allLoaded     = false;
 let _loadingMore   = false;
 let _activeChatId  = null;
+let _chatGeneration = 0;
+const _chatIsVisible = () => !document.hidden &&
+  !!document.getElementById("page-chat")?.classList.contains("active");
 
 async function startChatListener(chatId) {
+  if (!_chatIsVisible()) return;
+  const generation = ++_chatGeneration;
+  window._cleanupPollListeners?.();
   // ── إيقاف المستمع السابق ──────────────────
   if (msgUnsub) { msgUnsub(); msgUnsub = null; }
   if (_reactionsUnsub) { _reactionsUnsub(); _reactionsUnsub = null; }
@@ -76,7 +82,7 @@ async function startChatListener(chatId) {
   let skipLiveListener = false;
   try { initSnap = await getDocs(initQ); }
   catch(e) {
-    if (_activeChatId !== chatId) return;
+    if (_activeChatId !== chatId || generation !== _chatGeneration || !_chatIsVisible()) return;
     // ✅ محادثة خاصة جديدة لسه ماوصلهاش أول رسالة → privateChats/{chatId}
     // لسه مش موجود أصلًا (Rules بتعتمد get() على مستند الأب لإتاحة قراءة
     // الرسائل)، فالقراءة بترجع permission-denied بشكل طبيعي ومتوقّع في
@@ -95,7 +101,7 @@ async function startChatListener(chatId) {
     }
   }
 
-  if (_activeChatId !== chatId) return;
+  if (_activeChatId !== chatId || generation !== _chatGeneration || !_chatIsVisible()) return;
 
   // ✅ تعليم الرسائل كمقروءة: _markMessagesSeenAsync نفسها بتتجاهل
   // permission-denied بصمت (حالة المحادثة الجديدة اللي لسه مفيش لها
@@ -119,13 +125,13 @@ async function startChatListener(chatId) {
     if (isPrivateChat && !skipLiveListener) {
       try {
         const parentSnap = await getDoc(doc(db, "privateChats", privateChatId(chatId)));
-        if (_activeChatId !== chatId) return;
+        if (_activeChatId !== chatId || generation !== _chatGeneration || !_chatIsVisible()) return;
         if (!parentSnap.exists()) {
           window._dmNeedsRelisten = chatId;
           skipLiveListener = true;
         }
       } catch(e) {
-        if (_activeChatId !== chatId) return;
+        if (_activeChatId !== chatId || generation !== _chatGeneration || !_chatIsVisible()) return;
         window._dmNeedsRelisten = chatId;
         skipLiveListener = true;
       }
@@ -172,7 +178,7 @@ async function startChatListener(chatId) {
   }
 
   if (liveQ) msgUnsub = onSnapshot(liveQ, snap => {
-    if (_activeChatId !== chatId) return;
+    if (_activeChatId !== chatId || generation !== _chatGeneration || !_chatIsVisible()) return;
     snap.docChanges().forEach(ch => {
       if (ch.type === "added") {
         const el = document.getElementById("chatMessages");
@@ -241,7 +247,7 @@ async function startChatListener(chatId) {
       where("createdAt", ">=", oldestTs)
     );
     _reactionsUnsub = onSnapshot(reactQ, rSnap => {
-      if (_activeChatId !== chatId) return;
+      if (_activeChatId !== chatId || generation !== _chatGeneration || !_chatIsVisible()) return;
       rSnap.docChanges().forEach(ch => {
         if (ch.type !== "modified") return;
         const d   = ch.doc.data();
@@ -294,8 +300,9 @@ function _insertLoadMoreBtn(container, chatId) {
 
 /* ── تحميل رسائل أقدم (Pagination) ── */
 async function _loadOlderMessages(chatId) {
+  const generation = _chatGeneration;
   if (_loadingMore || _allLoaded || !_oldestDoc) return;
-  if (_activeChatId !== chatId) return;
+  if (_activeChatId !== chatId || generation !== _chatGeneration || !_chatIsVisible()) return;
 
   _loadingMore = true;
   const container = document.getElementById("chatMessages");
@@ -320,7 +327,7 @@ async function _loadOlderMessages(chatId) {
       limit(PAGE_SIZE)
     );
     const snap = await getDocs(olderQ);
-    if (_activeChatId !== chatId) return;
+    if (_activeChatId !== chatId || generation !== _chatGeneration || !_chatIsVisible()) return;
 
     if (snap.empty || snap.size < PAGE_SIZE) {
       _allLoaded = true;
@@ -380,7 +387,7 @@ async function _loadOlderMessages(chatId) {
       let _lastKnownH = container.scrollHeight;
       _pendingImgs.forEach(img => {
         img.addEventListener("load", () => {
-          if (_activeChatId !== chatId) return; // الشات تغيّر، لا داعي للتعويض
+          if (_activeChatId !== chatId || generation !== _chatGeneration || !_chatIsVisible()) return; // الشات تغيّر، لا داعي للتعويض
           const newH = container.scrollHeight;
           const diff = newH - _lastKnownH;
           _lastKnownH = newH;
@@ -394,11 +401,12 @@ async function _loadOlderMessages(chatId) {
       });
     }
   } catch(e) {
+    if (generation !== _chatGeneration) return;
     console.error("loadOlder:", e);
     if (btn) { btn.innerHTML = "<i class=\"fa-solid fa-arrow-up\"></i> تحميل رسائل أقدم"; btn.disabled = false; }
   }
 
-  _loadingMore = false;
+  if (generation === _chatGeneration) _loadingMore = false;
 }
 window.startChatListener = startChatListener;
 
@@ -407,6 +415,8 @@ window.startChatListener = startChatListener;
 ══════════════════════════════════════════ */
 // تحديد جميع الرسائل غير المقروءة كـ "seen" (batch) عند فتح المحادثة
 async function _markMessagesSeenAsync(otherUid) {
+  if (!_chatIsVisible() || _activeChatId !== otherUid) return;
+  const generation = _chatGeneration;
   // ✅ Privacy: إذا أوقف المستخدم إيصالات القراءة لا نُرسلها
   if (typeof _privPrefs !== "undefined" && _privPrefs.readReceipts === false) return;
   try {
@@ -417,7 +427,7 @@ async function _markMessagesSeenAsync(otherUid) {
       limit(50)
     );
     const snap = await getDocs(q);
-    if (snap.empty) return;
+    if (snap.empty || generation !== _chatGeneration || !_chatIsVisible()) return;
     const batch = writeBatch(db);
     // علّم فقط رسائل الطرف الآخر
     snap.forEach(d => {
@@ -434,6 +444,7 @@ async function _markMessagesSeenAsync(otherUid) {
 
 // Mark a single newly-arrived message as seen
 async function _markOneMsgSeen(otherUid, msgId) {
+  if (!_chatIsVisible() || _activeChatId !== otherUid) return;
   // ✅ Privacy: إذا أوقف المستخدم إيصالات القراءة لا نُرسلها
   if (typeof _privPrefs !== "undefined" && _privPrefs.readReceipts === false) return;
   try {
@@ -467,7 +478,21 @@ window._insertLoadMoreBtn     = _insertLoadMoreBtn;
 /* إيقاف مستمعات المحادثة المفتوحة (رسائل حية + تفاعلات) — تستدعيه index.html عند انتهاء الجلسة بدون إعادة تحميل.
    لا يُعيد البدء: startChatListener يُعيد تشغيلها عند فتح أي محادثة. */
 window._stopChatListener = function () {
+  ++_chatGeneration;
   _activeChatId = null;   // يُبطل أي startChatListener ما زال ينتظر استعلامه الأولي فلا ينشئ مستمعات بعد الإيقاف
   if (msgUnsub)        { try { msgUnsub(); } catch (e) {} msgUnsub = null; }
   if (_reactionsUnsub) { try { _reactionsUnsub(); } catch (e) {} _reactionsUnsub = null; }
 };
+
+// Navigation may be followed synchronously by selectChat(). Resume only if it
+// did not already attach the selected chat, avoiding a duplicate first query.
+window._resumeVisibleChat = () => {
+  if (_chatIsVisible() && !_activeChatId && window.currentUser?.uid)
+    startChatListener(window._currentChatId);
+};
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    window._stopChatListener();
+    window._cleanupPollListeners?.();
+  } else window._resumeVisibleChat();
+});

@@ -22,6 +22,13 @@
   const core = window.__LF.core;
 
   let _unsubFeed = null;
+  let _generation = 0;
+  function stop() {
+    ++_generation;
+    if (_unsubFeed) { try { _unsubFeed(); } catch (e) {} _unsubFeed = null; }
+  }
+  core.registerUnsubscribe(stop);
+
   let _allDocs = [];      // آخر نسخة من المنشورات المنشورة (للفلترة المحلية عند البحث)
   let _searchTerm = "";
   let _containerEl = null;
@@ -39,13 +46,16 @@
     // يمنع تكرار الاشتراك لو render() اتنادت تاني من غير إغلاق كامل (مثلاً ضغط التاب أكتر من مرة)
     if (_unsubFeed) { try { _unsubFeed(); } catch (e) {} _unsubFeed = null; }
 
+    const generation = ++_generation;
     let fs;
     try {
       fs = await core.getFS();
     } catch (e) {
+      if (generation !== _generation) return;
       renderError("تعذر الاتصال بقاعدة البيانات");
       return;
     }
+    if (generation !== _generation || document.hidden) return;
     const { db, collection, query, where, orderBy, onSnapshot } = fs;
 
     // ⚠️ عمدًا من غير limit(): البحث المحلي في renderList() بيفترض إن _allDocs = كل
@@ -70,9 +80,7 @@
       }
     );
 
-    core.registerUnsubscribe(() => {
-      if (_unsubFeed) { _unsubFeed(); _unsubFeed = null; }
-    });
+
   }
 
   /* ─────────────────────────────────────────
@@ -251,5 +259,5 @@
       </div>`;
   }
 
-  window.__LF.feed = { render, onSearchInput };
+  window.__LF.feed = { stop, render, onSearchInput };
 })();

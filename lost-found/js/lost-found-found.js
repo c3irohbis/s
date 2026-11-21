@@ -27,6 +27,13 @@
   const core = window.__LF.core;
 
   let _unsubFound = null;
+  let _generation = 0;
+  function stop() {
+    ++_generation;
+    if (_unsubFound) { try { _unsubFound(); } catch (e) {} _unsubFound = null; }
+  }
+  core.registerUnsubscribe(stop);
+
 
   /* ─────────────────────────────────────────
      الدخول من core.switchView("found")
@@ -72,13 +79,16 @@
 
     const listEl = container.querySelector(".lf-found-list");
 
+    const generation = ++_generation;
     let fs;
     try {
       fs = await core.getFS();
     } catch (e) {
+      if (generation !== _generation) return;
       renderError(listEl, "تعذر الاتصال بقاعدة البيانات");
       return;
     }
+    if (generation !== _generation || document.hidden) return;
     const { db, collection, query, where, orderBy, onSnapshot } = fs;
 
     const q = query(
@@ -99,9 +109,7 @@
       }
     );
 
-    core.registerUnsubscribe(() => {
-      if (_unsubFound) { _unsubFound(); _unsubFound = null; }
-    });
+
   }
 
   function renderList(listEl, docs) {
@@ -238,5 +246,5 @@
     }
   }
 
-  window.__LF.found = { render, markAsFound, correctBack };
+  window.__LF.found = { stop, render, markAsFound, correctBack };
 })();

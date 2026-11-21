@@ -81,14 +81,13 @@
   }
 
   function registerUnsubscribe(fn) {
-    if (typeof fn === "function") state.unsubscribers.push(fn);
+    if (typeof fn === "function" && !state.unsubscribers.includes(fn)) state.unsubscribers.push(fn);
   }
 
   function teardown() {
     state.unsubscribers.forEach((fn) => {
       try { fn(); } catch (e) { console.error("[LostFound] فشل إلغاء اشتراك:", e); }
     });
-    state.unsubscribers = [];
     closeModal();
   }
 
@@ -103,6 +102,7 @@
   }
 
   function closeModal() {
+    window.__LF.comments?.stop?.();
     const layer = state.root && state.root.querySelector(".lf-modal-layer");
     if (!layer) return;
     layer.hidden = true;
@@ -183,6 +183,10 @@
   ───────────────────────────────────────── */
   function switchView(viewName) {
     if (!state.root) return;
+    if (!["feed", "found", "admin"].includes(viewName) ||
+        (viewName === "admin" && !state.isAdmin)) return;
+    window.__LF[state.currentView]?.stop?.();
+    closeModal();
     state.currentView = viewName;
 
     state.root.querySelectorAll(".lf-tab").forEach((t) => {
@@ -237,6 +241,12 @@
     teardown();
     unmountRoot();
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!state.shellBuilt) return;
+    if (document.hidden) teardown();
+    else switchView(state.currentView);
+  });
 
   /* ─────────────────────────────────────────
      التصدير

@@ -2390,6 +2390,10 @@ window.setActiveWorld = function(worldId) {
   if (typeof window.isValidWorldId !== "function" || !window.isValidWorldId(worldId)) return;
   window._activeWorld = worldId;
   sessionStorage.setItem("activeWorld", worldId);
+  if (id !== "page-chat") {
+    window._stopChatListener?.();
+    window._cleanupPollListeners?.();
+  } else queueMicrotask(() => window._resumeVisibleChat?.());
   window._forumLiveSync?.();   // تبديل العالم: أعد ربط قوائم المنتدى الظاهرة بالعالم الجديد (أو افصلها)
   // معاينة الشات العام وقائمة الغرف مرتبطتان بالعالم النشط وقت البدء — أعد ربطهما بالعالم الجديد
   window._dmsStopListeners?.();
@@ -6320,7 +6324,7 @@ try { window._listenPinnedMsg?.(); } catch(e) {}
 <script type="module" src="js/auth-bridge.js"></script>
 <script type="module" src="js/audit-log.js?v=2"></script>
 <script type="module" src="js/chat-core.js?v=3"></script>
-<script type="module" src="js/chat-listener.js?v=3"></script>
+<script type="module" src="js/chat-listener.js?v=4"></script>
 <script type="module" src="js/chat-send.js?v=3"></script>
 <script src="js/chat-reactions.js?v=2"></script>
 <script src="js/chat-ctxmenu.js"></script>
@@ -7018,7 +7022,7 @@ try { window._listenPinnedMsg?.(); } catch(e) {}
      حاوية مستقلة + تحميل نقطة الدخول (Loader)
 ══════════════════════════════════════════ -->
 <div id="lost-found-app-root" aria-label="راحت فين؟" role="dialog"></div>
-<script src="lost-found/js/lost-found.js" defer></script>
+<script src="lost-found/js/lost-found.js?v=read-lifecycle-1" defer></script>
 
 <div id="military-app-root" aria-label="الخدمة العسكرية" role="dialog"></div>
 <script src="js/military.js" defer></script>

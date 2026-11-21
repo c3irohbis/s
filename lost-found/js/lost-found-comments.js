@@ -27,6 +27,13 @@
   const core = window.__LF.core;
 
   let _unsubComments = null;
+  let _generation = 0;
+  function stop() {
+    ++_generation;
+    if (_unsubComments) { try { _unsubComments(); } catch (e) {} _unsubComments = null; }
+  }
+  core.registerUnsubscribe(stop);
+
 
   /* ─────────────────────────────────────────
      الدخول من feed.openPostDetail()
@@ -55,13 +62,16 @@
     // يمنع تكرار الاشتراك لو render() اتنادت تاني على نفس المنشور من غير إغلاق كامل
     if (_unsubComments) { try { _unsubComments(); } catch (e) {} _unsubComments = null; }
 
+    const generation = ++_generation;
     let fs;
     try {
       fs = await core.getFS();
     } catch (e) {
+      if (generation !== _generation) return;
       renderError(container, "تعذر تحميل التعليقات");
       return;
     }
+    if (generation !== _generation || document.hidden) return;
     const { db, collection, query, orderBy, onSnapshot } = fs;
 
     const q = query(collection(db, "lostFound", postId, "comments"), orderBy("createdAt", "asc"));
@@ -78,9 +88,7 @@
       }
     );
 
-    core.registerUnsubscribe(() => {
-      if (_unsubComments) { _unsubComments(); _unsubComments = null; }
-    });
+
   }
 
   /* ─────────────────────────────────────────
@@ -251,5 +259,5 @@
       </div>`;
   }
 
-  window.__LF.comments = { render };
+  window.__LF.comments = { stop, render };
 })();
