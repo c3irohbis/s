@@ -200,6 +200,7 @@
     if (src.worldScoped) clauses.push(_fs.where("worldId", "==", _worldId));
     if (src.statusIn)    clauses.push(_fs.where("status", "in", src.statusIn));
     clauses.push(_fs.where(src.timeField, ">", lastSeen));
+    clauses.push(_fs.orderBy(src.timeField, "desc"));
     const q = _fs.query(_fs.collection(_db, src.col), ...clauses);
     return (await _fs.getCountFromServer(q)).data().count;
   }
