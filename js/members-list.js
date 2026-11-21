@@ -1,3 +1,5 @@
+import {collection,doc,getDoc,getDocs,query,where,orderBy,documentId,startAfter,limit} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
 /* ══════════════════════════════════════════
    MEMBERS LIST — Browse all users & open DM directly
    Owner → Admin → Members, with realtime search
@@ -5,8 +7,37 @@
 ══════════════════════════════════════════ */
 let _membersSearchDebounce = null;
 let _membersRenderGeneration = 0;
-let _allMembersCache = null;
-let _allMembersCacheTs = 0;
+let _memberPages = null;
+const MEMBER_PAGE_SIZE = 30;
+async function _browseMembers(more = false) {
+  const uid = window.currentUser?.uid, world = window.activeWorldContext?.() || null;
+  if (!uid) throw new Error("Directory requires sign-in");
+  const key = JSON.stringify([uid,world]);
+  if (!_memberPages || _memberPages.key !== key || (!more && Date.now()-_memberPages.ts >= 300000)) {
+    _memberPages = {key,ts:Date.now(),docs:[],cursor:null,more:true,loaded:false,pending:null};
+  }
+  const state = _memberPages;
+  if (state.pending) return state.pending;
+  if (state.loaded && (!more || !state.more)) return state;
+  const current = () => _memberPages === state && uid === window.currentUser?.uid && world === (window.activeWorldContext?.() || null);
+  state.pending = (async()=>{
+    const clauses = [where("worldId","==",world),orderBy(documentId(),"asc")];
+    if (state.cursor) clauses.push(startAfter(state.cursor));
+    const [snap,owner] = await Promise.all([
+      world ? getDocs(query(collection(window.db,"users"),...clauses,limit(MEMBER_PAGE_SIZE))) : null,
+      !state.loaded ? getDoc(doc(window.db,"users",window.OWNER_UID)) : null
+    ]);
+    if (!current()) throw new Error("Directory context changed");
+    const users = new Map(state.docs.map(u=>[u.uid,u]));
+    [...(snap?.docs || []),...(owner?.exists() ? [owner] : [])].forEach(d=>users.set(d.id,{...d.data(),id:d.id,uid:d.id}));
+    state.docs = [...users.values()];
+    if (snap?.docs.length) state.cursor = snap.docs[snap.docs.length-1];
+    state.more = !!snap && (!!snap.metadata?.fromCache || snap.docs.length === MEMBER_PAGE_SIZE);
+    state.loaded = true;
+    return state;
+  })().finally(()=>{state.pending=null;});
+  return state.pending;
+}
 
 // ── بحث الأعضاء داخل صفحة الدردشات (#page-dms) ──
 document.getElementById("dmsSearchInp")?.addEventListener("input", e => {
@@ -17,7 +48,8 @@ document.getElementById("dmsSearchInp")?.addEventListener("input", e => {
   _membersSearchDebounce = setTimeout(() => renderMembersList(q, "dmsMembersList"), 300);
 });
 
-async function renderMembersList(q, containerId = "dmsMembersList") {
+async function renderMembersList(q = "", containerId = "dmsMembersList", more = false) {
+  q = String(q).trim();
   const generation = ++_membersRenderGeneration;
   const uidAtStart = window.currentUser?.uid;
   const worldAtStart = window.activeWorldContext?.();
@@ -28,7 +60,8 @@ async function renderMembersList(q, containerId = "dmsMembersList") {
 
   try {
     if (!window._getWorldUsers) throw new Error("Scoped directory unavailable");
-    const all = await window._getWorldUsers();
+    const page = q ? null : await _browseMembers(more);
+    const all = q ? await window._getWorldUsers() : page.docs;
     if (generation !== _membersRenderGeneration || uidAtStart !== window.currentUser?.uid || worldAtStart !== window.activeWorldContext?.()) return;
 
     // ✅ World Isolation: أعضاء العالم الحالي فقط + الـOwner (Global) يظهر دائمًا
@@ -67,8 +100,24 @@ async function renderMembersList(q, containerId = "dmsMembersList") {
 
     el.innerHTML = "";
 
+    const addBrowseControls = () => {
+      if (q) return;
+      const note = document.createElement("div");
+      note.className = "dm-empty";
+      note.textContent = `المعروض ${filtered.length} عضو من الصفحات المحملة. البحث يشمل كل أعضاء العالم.`;
+      el.appendChild(note);
+      if (page.more) {
+        const button = document.createElement("button");
+        button.type = "button"; button.className = "btn ghost";
+        button.textContent = "تحميل المزيد من الأعضاء";
+        button.style.cssText = "display:block;margin:12px auto;padding:12px 20px;";
+        button.addEventListener("click",()=>renderMembersList("",containerId,true));
+        el.appendChild(button);
+      }
+    };
     if (!filtered.length) {
       el.innerHTML = `<div class="dm-empty">${q ? `لا نتائج لـ "${window.esc(q)}"` : "لا يوجد أعضاء"}</div>`;
+      addBrowseControls();
       return;
     }
 
@@ -127,9 +176,15 @@ async function renderMembersList(q, containerId = "dmsMembersList") {
       });
     });
 
+    addBrowseControls();
   } catch(e) {
     if (generation !== _membersRenderGeneration) return;
     el.innerHTML = `<div class="dm-empty">خطأ في التحميل</div>`;
+    const retry = document.createElement("button");
+    retry.type = "button"; retry.className = "btn ghost"; retry.textContent = "إعادة المحاولة";
+    retry.style.cssText = "display:block;margin:12px auto;padding:12px 20px;";
+    retry.addEventListener("click",()=>renderMembersList(q,containerId,more));
+    el.appendChild(retry);
     console.error(e);
   }
 }
