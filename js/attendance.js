@@ -323,6 +323,7 @@ async function _loadAttMonth() {
     _attRecordsCache = {};
     snap.forEach(d => { _attRecordsCache[d.id] = d.data(); });
     _renderAttCalendar();
+    if (snap.metadata?.fromCache && grid) grid.insertAdjacentHTML("afterbegin", `<div class="empty-state">عرض نسخة محفوظة بدون اتصال. قد لا تظهر كل سجلات الشهر حتى عودة الاتصال.</div>`);
   } catch(e) {
     if (current() && grid) grid.innerHTML = `<div class="empty-state">تعذّر تحميل الشهر، حاول مرة أخرى</div>`;
   }
