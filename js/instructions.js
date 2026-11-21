@@ -106,9 +106,11 @@
     _gwInflight = (async () => {
       for (let attempt = 0; attempt < 3; attempt++) { // إعادتان كحد أقصى، على 5xx/الشبكة فقط
         try {
+          // If-None-Match فقط إذا كانت النسخة المحلية موجودة فعلًا (close() يفرّغ _docs؛ وإلا أظهر 304 قائمة فارغة خطأً)
+          const hasLocal = Object.keys(_docs).length > 0;
           const r = await fetch(GW_URL + "/v1/content/instructions", {
             signal: ac.signal,
-            headers: { Authorization: "Bearer " + (await _gwToken()), ...(_gwEtag ? { "If-None-Match": _gwEtag } : {}) },
+            headers: { Authorization: "Bearer " + (await _gwToken()), ...(_gwEtag && hasLocal ? { "If-None-Match": _gwEtag } : {}) },
           });
           if (r.status === 304) { _gwRenderFromDocs(); return; }
           if (r.status === 503 || (r.status >= 400 && r.status < 500)) { _gwToFirebase(); return; } // disabled أو 4xx: فورًا وبلا إعادة
