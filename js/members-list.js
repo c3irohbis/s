@@ -103,9 +103,10 @@ async function renderMembersList(q = "", containerId = "dmsMembersList", more = 
     const addBrowseControls = () => {
       if (q) return;
       const note = document.createElement("div");
-      note.className = "dm-empty";
+      note.className = "members-page-note";
+      note.style.cssText = "padding:10px 14px;font-size:12px;color:var(--muted);text-align:center;";
       note.textContent = `المعروض ${filtered.length} عضو من الصفحات المحملة. البحث يشمل كل أعضاء العالم.`;
-      el.appendChild(note);
+      el.prepend(note);
       if (page.more) {
         const button = document.createElement("button");
         button.type = "button"; button.className = "btn ghost";
