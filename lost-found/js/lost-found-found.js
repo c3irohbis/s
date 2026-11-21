@@ -17,7 +17,7 @@
  *
  *  ⚠️ ملاحظة: الإحصائيات بتتحسب مرة واحدة عند فتح التاب (getCountFromServer قراءة
  *  لحظية، مش onSnapshot — Firestore مبيدعمش استماع مباشر لنتيجة count). قائمة
- *  الأرشيف نفسها live فعليًا عبر onSnapshot.
+ *  الأرشيف بتتحمل بصفحات عند الطلب مع زر تحديث صريح.
  */
 
 (function () {
@@ -26,28 +26,28 @@
   window.__LF = window.__LF || {};
   const core = window.__LF.core;
 
-  let _unsubFound = null;
-  let _generation = 0;
-  function stop() {
-    ++_generation;
-    if (_unsubFound) { try { _unsubFound(); } catch (e) {} _unsubFound = null; }
-  }
+  const PAGE_SIZE = 30;
+  let _generation = 0, _container = null, _docs = [], _cursor = null;
+  let _hasMore = true, _loading = false;
+  function stop() { ++_generation; _loading = false; _container = null; }
   core.registerUnsubscribe(stop);
-
 
   /* ─────────────────────────────────────────
      الدخول من core.switchView("found")
   ───────────────────────────────────────── */
   function render(container) {
+    stop(); _container = container; _docs = []; _cursor = null; _hasMore = true;
     container.innerHTML = `
+      <div class="lf-found-toolbar"><span>الأرشيف حسب آخر تحديث</span> <button type="button" class="lf-found-refresh">تحديث</button></div>
       <div class="lf-found-stats">
         <div class="lf-stat"><span class="lf-stat-num">—</span><span class="lf-stat-label">تم العثور عليها</span></div>
       </div>
       <div class="lf-found-list"><div class="lf-loading"><i class="fa-solid fa-spinner fa-spin"></i></div></div>
     `;
 
+    container.querySelector(".lf-found-refresh").addEventListener("click", () => render(container));
     renderStats(container.querySelector(".lf-found-stats"));
-    startListener(container);
+    loadNext();
   }
 
   /* ─────────────────────────────────────────
@@ -56,13 +56,16 @@
   ───────────────────────────────────────── */
   async function renderStats(statsEl) {
     if (!statsEl) return;
+    const generation = _generation, uid = window.currentUser?.uid;
     try {
       const fs = await core.getFS();
+      if (generation !== _generation || uid !== window.currentUser?.uid) return;
       const { db, collection, query, where, getCountFromServer } = fs;
 
       const foundQ = query(collection(db, "lostFound"), where("status", "==", "found"));
       const foundSnap = await getCountFromServer(foundQ);
 
+      if (generation !== _generation || uid !== window.currentUser?.uid) return;
       const nums = statsEl.querySelectorAll(".lf-stat-num");
       if (nums[0]) nums[0].textContent = foundSnap.data().count;
     } catch (e) {
@@ -72,59 +75,65 @@
   }
 
   /* ─────────────────────────────────────────
-     قائمة الأرشيف — live فعليًا
+     قائمة الأرشيف — صفحات بالمؤشر وتحديث صريح
   ───────────────────────────────────────── */
-  async function startListener(container) {
-    if (_unsubFound) { try { _unsubFound(); } catch (e) {} _unsubFound = null; }
-
-    const listEl = container.querySelector(".lf-found-list");
-
-    const generation = ++_generation;
-    let fs;
+  async function loadNext() {
+    if (_loading || !_hasMore || !_container) return;
+    const generation = _generation, container = _container;
+    const uid = window.currentUser?.uid;
+    const current = () => generation === _generation && container === _container && uid === window.currentUser?.uid;
+    _loading = true;
+    const button = container.querySelector(".lf-found-more");
+    if (button) button.disabled = true;
     try {
-      fs = await core.getFS();
-    } catch (e) {
-      if (generation !== _generation) return;
-      renderError(listEl, "تعذر الاتصال بقاعدة البيانات");
-      return;
-    }
-    if (generation !== _generation || document.hidden) return;
-    const { db, collection, query, where, orderBy, onSnapshot } = fs;
-
-    const q = query(
-      collection(db, "lostFound"),
-      where("status", "==", "found"),
-      orderBy("resolvedAt", "desc")
-    );
-
-    _unsubFound = onSnapshot(
-      q,
-      (snap) => {
-        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        renderList(listEl, docs);
-      },
-      (err) => {
-        console.error("[LostFound:found]", err);
-        renderError(listEl, "حدث خطأ أثناء تحميل الأرشيف");
+      const {db,collection,query,where,orderBy,startAfter,limit,getDocs} = await core.getFS();
+      if (!current()) return;
+      const clauses = [where("status", "==", "found"),orderBy("resolvedAt", "desc")];
+      if (_cursor) clauses.push(startAfter(_cursor));
+      const snap = await getDocs(query(collection(db,"lostFound"),...clauses,limit(PAGE_SIZE)));
+      if (!current()) return;
+      const seen = new Set(_docs.map(d=>d.id));
+      snap.docs.forEach(d=>{if(!seen.has(d.id)) _docs.push({id:d.id,...d.data()});});
+      if (snap.docs.length) _cursor = snap.docs[snap.docs.length-1];
+      _hasMore = !!snap.metadata?.fromCache || snap.docs.length === PAGE_SIZE;
+      renderList(container.querySelector(".lf-found-list"),_docs);
+    } catch(e) {
+      if (!current()) return;
+      if (!_docs.length) renderError(container.querySelector(".lf-found-list"),"تعذر تحميل الأرشيف، اضغط تحديث للمحاولة");
+      else window.toast?.("تعذر تحميل الصفحة التالية، حاول مرة أخرى", "error");
+    } finally {
+      if (current()) {
+        _loading = false;
+        const more = container.querySelector(".lf-found-more");
+        if (more) more.disabled = false;
       }
-    );
+    }
+  }
 
-
+  function removeLocal(postId) {
+    if (!_container || !_docs.some(d=>d.id===postId)) return;
+    _docs = _docs.filter(d=>d.id!==postId);
+    renderList(_container.querySelector(".lf-found-list"),_docs);
+    const count = _container.querySelector(".lf-stat-num");
+    if (count && Number.isFinite(Number(count.textContent))) count.textContent = Math.max(0,Number(count.textContent)-1);
   }
 
   function renderList(listEl, docs) {
     if (!listEl) return;
 
+    const more = _hasMore ? `<button type="button" class="lf-found-more">تحميل المزيد من الأرشيف</button>` : "";
     if (docs.length === 0) {
       listEl.innerHTML = `
         <div class="lf-empty">
           <i class="fa-solid fa-box-open"></i>
-          <p>لسه مفيش حاجة اتلقيت</p>
-        </div>`;
+          <p>${_hasMore ? "لا توجد نتائج مؤكدة، اتصل بالإنترنت وحاول مجددًا" : "لسه مفيش حاجة اتلقيت"}</p>
+        </div>` + more;
+      listEl.querySelector(".lf-found-more")?.addEventListener("click",loadNext);
       return;
     }
 
-    listEl.innerHTML = docs.map(renderArchiveItem).join("");
+    listEl.innerHTML = docs.map(renderArchiveItem).join("") + more;
+    listEl.querySelector(".lf-found-more")?.addEventListener("click",loadNext);
 
     // زرار التصحيح (found → published) للأدمن/الأونر بس — تحقق واجهة، والدالة نفسها بتتحقق تاني
     if (core.state.isAdmin) {
@@ -239,6 +248,7 @@
         resolvedAt: null,
       });
 
+      removeLocal(postId);
       window.toast?.("تم التراجع، رجع للمنشورات ✓");
     } catch (e) {
       console.error("[LostFound:found] فشل correctBack", e);
@@ -246,5 +256,5 @@
     }
   }
 
-  window.__LF.found = { stop, render, markAsFound, correctBack };
+  window.__LF.found = { stop, render, markAsFound, correctBack, removeLocal };
 })();

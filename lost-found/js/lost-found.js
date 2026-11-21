@@ -37,7 +37,7 @@
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = src + "?v=read-lifecycle-1";
+      s.src = src + "?v=archive-pages-1";
       s.onload = resolve;
       s.onerror = () => reject(new Error("فشل تحميل: " + src));
       document.body.appendChild(s);

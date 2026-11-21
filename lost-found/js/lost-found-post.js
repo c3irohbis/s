@@ -396,6 +396,7 @@
       }
 
       await deleteDoc(postRef);
+      window.__LF.found?.removeLocal?.(postId);
       window.toast?.("تم حذف المنشور ✓");
       core.closeModal();
     } catch (e) {

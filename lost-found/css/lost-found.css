@@ -271,3 +271,9 @@ html.theme-light .lf-post-footer { border-top-color:rgba(0,0,0,.06); }
 html.theme-light .lf-comments { border-top-color:rgba(0,0,0,.08); }
 html.theme-light .lf-upload-progress-track { background:rgba(0,0,0,.08); }
 html.theme-light .lf-confirm-cancel-btn { background:rgba(0,0,0,.05); }
+
+/* Cursor-paged archive controls. */
+.lf-found-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px; color:var(--muted,#5a7499); }
+.lf-found-refresh, .lf-found-more { padding:10px 16px; border:1px solid var(--border,#242426); border-radius:12px; background:var(--gold,#c9a96e); color:#060d1a; font-family:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+.lf-found-more { width:100%; margin-top:4px; }
+.lf-found-more:disabled { opacity:.55; cursor:wait; }
