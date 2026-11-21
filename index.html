@@ -1310,10 +1310,13 @@ if ("serviceWorker" in navigator) {
         <div class="owner-collapse-panel">
           <div class="owner-collapse-inner">
             <div class="analytics-sec" id="analyticsSec">
+              <p class="label" id="analyticsReadNotice">التحليلات التفصيلية لا تُحمّل تلقائيًا لتوفير القراءات. تحميلها أو تغيير الفترة يقرأ سجل الرسائل والمستخدمين كاملًا حتى تتوفر ملخصات الخادم.</p>
+              <button class="btn btn-gold" type="button" onclick="loadOwnerAnalytics()">تحميل التحليلات التفصيلية</button>
+
               <!-- Period Tabs -->
               <div class="analytics-period-tabs">
-                <button class="analytics-period-tab active" data-period="day"   onclick="switchAnalyticsPeriod(this)">اليوم</button>
-                <button class="analytics-period-tab"        data-period="week"  onclick="switchAnalyticsPeriod(this)">الأسبوع</button>
+                <button class="analytics-period-tab" data-period="day"   onclick="switchAnalyticsPeriod(this)">اليوم</button>
+                <button class="analytics-period-tab active" data-period="week"  onclick="switchAnalyticsPeriod(this)">الأسبوع</button>
                 <button class="analytics-period-tab"        data-period="month" onclick="switchAnalyticsPeriod(this)">الشهر</button>
               </div>
               <!-- Main Stats Grid -->
@@ -1386,7 +1389,7 @@ if ("serviceWorker" in navigator) {
         <div class="owner-collapse-panel">
           <div class="owner-collapse-inner">
             <div class="analytics-top-list" id="analyticsTopSenders">
-              <div class="empty-state" style="padding:14px 0;">جاري التحميل...</div>
+              <div class="empty-state" style="padding:14px 0;">تظهر بعد تحميل التحليلات التفصيلية</div>
             </div>
           </div>
         </div>
@@ -1405,7 +1408,7 @@ if ("serviceWorker" in navigator) {
         <div class="owner-collapse-panel">
           <div class="owner-collapse-inner">
             <div class="analytics-top-list" id="analyticsTopUploaders">
-              <div class="empty-state" style="padding:14px 0;">جاري التحميل...</div>
+              <div class="empty-state" style="padding:14px 0;">تظهر بعد تحميل التحليلات التفصيلية</div>
             </div>
           </div>
         </div>
@@ -2028,7 +2031,7 @@ import {
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentSingleTabManager,
   doc, setDoc, getDoc, updateDoc, deleteDoc,
-  collection, addDoc, getDocs, writeBatch,
+  collection, addDoc, getDocs, getCountFromServer, writeBatch,
   query, orderBy, onSnapshot, serverTimestamp,
   limit, where, startAfter, deleteField,
   arrayUnion, arrayRemove, increment,
@@ -4295,27 +4298,28 @@ function closeUsersManager() {
 window.openUsersManager  = openUsersManager;
 window.closeUsersManager = closeUsersManager;
 
+let _ownerStatsPending = null;
 async function loadOwnerStats() {
-  try {
-    const snap = await getDocs(collection(db, "users"));
-    let total=0, admins=0, banned=0, users=0;
-    snap.forEach(d => {
-      const u = d.data();
-      total++;
-      if (u.role === ROLES.ADMIN)  admins++;
-      if (u.isBanned)              banned++;
-      if (u.role === ROLES.USER)   users++;
-    });
-    document.getElementById("statTotal").textContent  = total;
-    document.getElementById("statAdmins").textContent = admins;
-    document.getElementById("statBanned").textContent = banned;
-    document.getElementById("statUsers").textContent  = users;
-    // تحديث subtitle في modal
-    const subEl = document.getElementById("umHeaderSub");
-    if (subEl) subEl.textContent = `${total} مستخدم · ${admins} أدمن · ${banned} محظور`;
-  } catch(e) { console.error(e); }
-  // تحميل التحليلات
-  loadAnalytics("week");
+  if (_ownerStatsPending) return _ownerStatsPending;
+  _ownerStatsPending = (async () => {
+    try {
+      const usersRef = collection(db, "users");
+      const counts = await Promise.all([
+        getCountFromServer(usersRef),
+        getCountFromServer(query(usersRef, where("role", "==", ROLES.ADMIN))),
+        getCountFromServer(query(usersRef, where("isBanned", "==", true))),
+        getCountFromServer(query(usersRef, where("role", "==", ROLES.USER)))
+      ]);
+      const [total, admins, banned, users] = counts.map(snap => snap.data().count);
+      document.getElementById("statTotal").textContent = total;
+      document.getElementById("statAdmins").textContent = admins;
+      document.getElementById("statBanned").textContent = banned;
+      document.getElementById("statUsers").textContent = users;
+      const subEl = document.getElementById("umHeaderSub");
+      if (subEl) subEl.textContent = `${total} مستخدم · ${admins} أدمن · ${banned} محظور`;
+    } catch(e) { console.error("owner counts:", e); }
+  })().finally(() => { _ownerStatsPending = null; });
+  return _ownerStatsPending;
 }
 
 /* ══════════════════════════════════════════
@@ -4324,15 +4328,22 @@ async function loadOwnerStats() {
 let _analyticsChartMsgs  = null;
 let _analyticsChartUsers = null;
 let _analyticsPeriod     = "week";
+let _analyticsLoading = false;
 
 function switchAnalyticsPeriod(btn) {
+  if (_analyticsLoading) return;
   document.querySelectorAll(".analytics-period-tab").forEach(t => t.classList.remove("active"));
   btn.classList.add("active");
   _analyticsPeriod = btn.dataset.period;
   loadAnalytics(_analyticsPeriod);
 }
 
+window.switchAnalyticsPeriod = switchAnalyticsPeriod;
+window.loadOwnerAnalytics = () => loadAnalytics(_analyticsPeriod);
+
 async function loadAnalytics(period) {
+  if (_analyticsLoading) return;
+  _analyticsLoading = true;
   try {
     const now   = Date.now();
     const dayMs = 86400000;
@@ -4379,6 +4390,10 @@ async function loadAnalytics(period) {
     const todayCutoff = now - dayMs;
     const msgCounts   = {}; // uid → count
     const fileCounts  = {}; // uid → file count
+    const messageBuckets = new Array(buckets).fill(0);
+    const recordMessageBucket = t => {
+      if (t >= cutoff && t <= now) messageBuckets[Math.min(buckets-1, Math.floor((t-cutoff)/((now-cutoff)/buckets)))]++;
+    };
 
     const msgSnap = await getDocs(collection(db, "messages"));
     msgSnap.forEach(d => {
@@ -4388,6 +4403,7 @@ async function loadAnalytics(period) {
       msgsTotal++;
       if (t >= todayCutoff) msgsToday++;
       if (t >= cutoff)      msgsPeriod++;
+      recordMessageBucket(t);
       if (uid) { msgCounts[uid] = (msgCounts[uid]||0) + 1; }
       if (m.type === "image" || m.fileUrl || m.imageUrl) {
         if (uid) fileCounts[uid] = (fileCounts[uid]||0) + 1;
@@ -4410,6 +4426,7 @@ async function loadAnalytics(period) {
           msgsTotal++;
           if (t >= todayCutoff) msgsToday++;
           if (t >= cutoff)      msgsPeriod++;
+          recordMessageBucket(t);
           if (uid) { msgCounts[uid] = (msgCounts[uid]||0) + 1; }
           if (m.type === "image" || m.fileUrl || m.imageUrl) {
             if (uid) fileCounts[uid] = (fileCounts[uid]||0) + 1;
@@ -4462,9 +4479,10 @@ async function loadAnalytics(period) {
     _renderAnalyticsTopList("analyticsTopUploaders", topUploadersArr.map(([,v]) => ({ name: v.name, val: v.count+" ملف" })));
 
     // ── Charts ──
-    _drawAnalyticsChart(period, buckets, bucketLabel, cutoff, now, allUsers);
+    _drawAnalyticsChart(period, buckets, bucketLabel, cutoff, now, allUsers, messageBuckets);
 
   } catch(e) { console.error("analytics error:", e); }
+  finally { _analyticsLoading = false; }
 }
 
 function _renderAnalyticsTopList(containerId, items) {
@@ -4480,7 +4498,7 @@ function _renderAnalyticsTopList(containerId, items) {
     </div>`).join("");
 }
 
-function _drawAnalyticsChart(period, buckets, bucketLabel, cutoff, now, allUsers) {
+function _drawAnalyticsChart(period, buckets, bucketLabel, cutoff, now, allUsers, messageBuckets) {
   const isLight = document.documentElement.classList.contains("theme-light");
   const gridColor  = isLight ? "rgba(0,0,0,.07)"  : "rgba(255,255,255,.07)";
   const labelColor = isLight ? "#6b83a3"           : "rgba(160,185,220,.75)";
@@ -4501,15 +4519,14 @@ function _drawAnalyticsChart(period, buckets, bucketLabel, cutoff, now, allUsers
     }
   });
 
-  // Message activity — placeholder from msgsToday distributed
-  const msgFakeData = Array.from({length: buckets}, () => Math.floor(Math.random() * 10));
+  const messageData = messageBuckets || new Array(buckets).fill(0);
 
   const ctxMsgs  = document.getElementById("analyticsChartMsgs");
   const ctxUsers = document.getElementById("analyticsChartUsers");
 
   if (ctxMsgs) {
     if (_analyticsChartMsgs) { try { _analyticsChartMsgs.destroy(); } catch(e){} }
-    _analyticsChartMsgs = _miniLineChart(ctxMsgs, labels, msgFakeData, gold, gridColor, labelColor);
+    _analyticsChartMsgs = _miniLineChart(ctxMsgs, labels, messageData, gold, gridColor, labelColor);
   }
   if (ctxUsers) {
     if (_analyticsChartUsers) { try { _analyticsChartUsers.destroy(); } catch(e){} }
