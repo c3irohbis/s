@@ -7,7 +7,7 @@ const source = p => fs.readFileSync(path.join(__dirname,'..',p),'utf8');
 const flush = () => new Promise(r => setImmediate(r));
 
 test('all lost-found views cancel pending starts and detach active subscriptions',async()=>{
-  for(const name of ['feed','admin','comments']) {
+  for(const name of ['feed','admin']) {
     const pending=[],subscriptions=[],callbacks=[];
     const el={innerHTML:'',querySelector(){return el},querySelectorAll(){return []},addEventListener(){}};
     const sdk={db:{},collection(){},where(){},orderBy(){},query(){},

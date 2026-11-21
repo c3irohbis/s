@@ -277,3 +277,8 @@ html.theme-light .lf-confirm-cancel-btn { background:rgba(0,0,0,.05); }
 .lf-found-refresh, .lf-found-more { padding:10px 16px; border:1px solid var(--border,#242426); border-radius:12px; background:var(--gold,#c9a96e); color:#060d1a; font-family:inherit; font-size:13px; font-weight:700; cursor:pointer; }
 .lf-found-more { width:100%; margin-top:4px; }
 .lf-found-more:disabled { opacity:.55; cursor:wait; }
+
+.lf-comments-refresh, .lf-comments-more, .lf-replies-more { padding:9px 14px; border:1px solid var(--border,#242426); border-radius:12px; background:var(--card,#1c1c1e); color:var(--text,#e8edf5); font-family:inherit; font-size:12px; cursor:pointer; }
+.lf-comments-more { width:100%; margin:10px 0; }
+.lf-replies-more { margin:8px 0 0; color:var(--gold,#c9a96e); }
+.lf-comments-more:disabled, .lf-replies-more:disabled { opacity:.55; cursor:wait; }
