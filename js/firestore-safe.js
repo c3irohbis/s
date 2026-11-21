@@ -32,17 +32,40 @@ import {
   runTransaction as _rawRunTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-export async function getDoc(ref) {
-  try {
-    return await _rawGetDoc(ref);
-  } catch (e) {
-    // فشل الوصول للسيرفر (غالبًا بسبب انقطاع النت) — نرجع للكاش المحلي
-    try {
-      return await getDocFromCache(ref);
-    } catch (_e2) {
-      throw e; // لا يوجد كاش أيضاً — نرفع الخطأ الأصلي
-    }
+// Only this non-security preference document is shared. All permission,
+// maintenance, role, consent and query reads keep their authoritative behavior.
+const _prefsReads = new Map();
+const _prefsTTL = 30000;
+let _prefsAccount = null;
+function _prefsKey(ref) {
+  const uid = globalThis.currentUser?.uid || null;
+  if (uid !== _prefsAccount) { _prefsReads.clear(); _prefsAccount = uid; }
+  return uid && ref?.path === `users/${uid}/settings/appPrefs` ? ref.path : null;
+}
+async function _readDocWithOfflineFallback(ref) {
+  try { return await _rawGetDoc(ref); }
+  catch (e) {
+    try { return await getDocFromCache(ref); }
+    catch (_e2) { throw e; }
   }
+}
+export async function getDoc(ref) {
+  const key = _prefsKey(ref);
+  if (!key) return _readDocWithOfflineFallback(ref);
+  const existing = _prefsReads.get(key);
+  if (existing && existing.db === ref.firestore &&
+      (existing.pending || Date.now()-existing.at < _prefsTTL)) return existing.promise;
+  const entry = { db: ref.firestore, pending: true, at: 0, promise: null };
+  entry.promise = _readDocWithOfflineFallback(ref).then(snapshot => {
+    // Offline snapshots may be incomplete/stale. Share that attempt while it is
+    // in flight, but do not mark it as a fresh server preference document.
+    if (_prefsReads.get(key) !== entry) return snapshot;
+    if (snapshot.metadata?.fromCache) _prefsReads.delete(key);
+    else { entry.pending = false; entry.at = Date.now(); }
+    return snapshot;
+  },error => { if (_prefsReads.get(key) === entry) _prefsReads.delete(key); throw error; });
+  _prefsReads.set(key,entry);
+  return entry.promise;
 }
 
 export async function getDocs(q) {
@@ -64,6 +87,8 @@ export async function getDocs(q) {
    بيتبلع (الكتابة الأصلية ما بتتأثرش أبدًا).
 ══════════════════════════════════════════ */
 function _gate(op, ref, data, opts) {
+  const preferenceKey = _prefsKey(ref);
+  if (preferenceKey) _prefsReads.delete(preferenceKey);
   try {
     const g = globalThis.__forumGate;
     if (g && ref && typeof ref.path === "string") g.touch(op, ref.path, data, opts);
