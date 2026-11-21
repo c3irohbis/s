@@ -20,7 +20,7 @@
    الرد:   { token, url, room, identity }
    ========================================================================== */
 
-const LK_ALLOWED_ORIGINS = ["https://cairohbis.github.io"]; // الأصول المسموحة فقط
+const LK_ALLOWED_ORIGINS = ["https://c3irohbis.github.io"]; // الأصول المسموحة فقط — المصدر الحقيقي المنشور: livekit-calls-worker.js
 
 function lkOriginAllowed(request) {
   const origin = request.headers.get("Origin");
