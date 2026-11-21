@@ -257,21 +257,20 @@ async function _markMessagesSeenAsync(otherUid) {
   if (typeof _privPrefs !== "undefined" && _privPrefs.readReceipts === false) return;
   try {
     const roomId = privateChatId(otherUid);
-    const q = query(
-      collection(db, `privateChats/${roomId}/messages`),
-      where("seen", "==", false),
-      limit(50)
-    );
-    const snap = await getDocs(q);
-    if (snap.empty || generation !== _chatGeneration || !_chatIsVisible()) return;
-    const batch = writeBatch(db);
-    // علّم فقط رسائل الطرف الآخر
-    snap.forEach(d => {
-      if (d.data().uid !== currentUser.uid) {
-        batch.update(d.ref, { seen: true, delivered: true });
-      }
-    });
-    await batch.commit();
+    // Read/commit only incoming unseen messages, fifty at a time. Continue
+    // deliberately through the backlog while this chat remains visible.
+    while (_isCurrent(otherUid,generation)) {
+      if (typeof _privPrefs !== "undefined" && _privPrefs.readReceipts === false) return;
+      const snap = await getDocs(query(
+        collection(db, `privateChats/${roomId}/messages`),
+        where("uid", "==", otherUid), where("seen", "==", false), limit(50)
+      ));
+      if (snap.empty || !_isCurrent(otherUid,generation)) return;
+      const batch = writeBatch(db);
+      snap.forEach(d => batch.update(d.ref, { seen: true, delivered: true }));
+      await batch.commit();
+      if (snap.size < 50) return;
+    }
   } catch(e) {
     // غير حرجة — تجاهل أخطاء الـ index أو الـ permission
     if (e.code !== "permission-denied") console.warn("markSeen:", e.code);

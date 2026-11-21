@@ -11,7 +11,7 @@
 ══════════════════════════════════════════════════════════════ */
 
 import {
-  collection, query, where, doc, updateDoc,
+  collection, query, where, orderBy, limit, doc, updateDoc,
   deleteField, serverTimestamp, getDocs, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -318,16 +318,18 @@ function _exWatchAndInsertDivider(chatId, roomId, anchorId) {
   // (قد لا يُلاحَظ الفاصل إطلاقًا لو اختفى خلال أجزاء من الثانية).
 }
 
+let _exCaptureGeneration = 0;
 async function _exCaptureUnreadDivider(chatId) {
+  const generation = ++_exCaptureGeneration;
   if (!chatId || chatId === "public" || chatId.startsWith("room:") || !window.db) return;
   const roomId = _exRoomId(chatId);
   if (!roomId) return;
   try {
-    const uQ = query(collection(window.db, `privateChats/${roomId}/messages`), where("uid", "==", chatId), where("seen", "==", false));
+    const uQ = query(collection(window.db, `privateChats/${roomId}/messages`), where("uid", "==", chatId), where("seen", "==", false), orderBy("createdAt", "asc"), limit(1));
     const snap = await getDocs(uQ);
+    if (generation !== _exCaptureGeneration || window._currentChatId !== chatId || document.hidden) return;
     const others = snap.docs;
     if (!others.length) return;
-    others.sort((a, b) => (a.data().createdAt?.toMillis?.() ?? 0) - (b.data().createdAt?.toMillis?.() ?? 0));
     _exWatchAndInsertDivider(chatId, roomId, others[0].id);
   } catch (e) {}
 }

@@ -60,3 +60,18 @@ test('disjoint reconnect head resets the cursor to avoid skipping the offline ga
  const p=f.ctx._loadOlderMessages('public');assert.ok(f.reads[0].q.parts.some(p=>p.after==='061'));
  f.reads[0].resolve(snapshot([]));await p;
 });
+test('receipt batches query only the peer, drain deliberately, and stop if hidden',async()=>{
+ const f=fixture();let commits=0,updates=0;
+ f.ctx.privateChatId=()=> 'pair';
+ f.ctx.writeBatch=()=>({update(){updates++},commit:async()=>{commits++}});
+ await f.ctx.startChatListener('peer');
+ const p=f.ctx._markMessagesSeenAsync('peer');
+ assert.ok(f.reads[0].q.parts.some(p=>p.where?.[0]==='uid' && p.where[2]==='peer'));
+ assert.ok(f.reads[0].q.parts.some(p=>p.limit===50));
+ const batch=n=>({size:n,empty:n===0,forEach:fn=>Array.from({length:n},(_,i)=>fn({ref:i}))});
+ f.reads[0].resolve(batch(50));await new Promise(r=>setImmediate(r));
+ assert.equal(commits,1);assert.equal(f.reads.length,2);
+ f.reads[1].resolve(batch(7));await p;assert.equal(commits,2);assert.equal(updates,57);
+ const p2=f.ctx._markMessagesSeenAsync('peer');f.ctx.document.hidden=true;
+ f.reads[2].resolve(batch(50));await p2;assert.equal(commits,2,'no hidden-page receipt writes');
+});
