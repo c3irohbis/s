@@ -7,7 +7,7 @@ import { doc, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.co
    ▸ لا يسجل خروج المستخدمين ولا يحذف أي بيانات
 ══════════════════════════════════════════ */
 
-const OWNER_UID = "dKTc7vqFNGO7vqamubap5dKnn7z1";
+const OWNER_UID = "wnvQPme3u0NU4VVqvr4DGqvv4KE3";
 
 let _maintEnabled = false;
 

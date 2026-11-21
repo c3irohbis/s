@@ -13,7 +13,7 @@
 const admin = require("firebase-admin");
 admin.initializeApp();
 
-const OWNER_UID = "dKTc7vqFNGO7vqamubap5dKnn7z1";
+const OWNER_UID = "wnvQPme3u0NU4VVqvr4DGqvv4KE3";
 const doDelete  = process.argv.includes("--delete");
 const days      = Number((process.argv.find(a => a.startsWith("--days=")) || "--days=7").split("=")[1]);
 const cutoff    = Date.now() - days * 864e5;

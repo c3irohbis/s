@@ -7,7 +7,7 @@
      LIVEKIT_API_SECRET   (Secret)
      LIVEKIT_URL          مثال: wss://YOUR-PROJECT.livekit.cloud
      FIREBASE_PROJECT_ID  = YOUR_PROJECT_ID   (غالبًا موجود عندك بالفعل)
-     OWNER_UID            = dKTc7vqFNGO7vqamubap5dKnn7z1  (بدونه لا توجد صلاحية مالك في المكالمات)
+     OWNER_UID            = wnvQPme3u0NU4VVqvr4DGqvv4KE3  (بدونه لا توجد صلاحية مالك في المكالمات)
 
    الربط داخل fetch() الحالي — سطران فقط قبل منطق FCM الحالي:
      const url = new URL(request.url);

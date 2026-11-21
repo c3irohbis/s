@@ -2054,10 +2054,10 @@ const firebaseConfig = {
   appId:             "1:665165296802:web:57aa1315497e48c25ad3fb"
 };
 
-const OWNER_UID = "dKTc7vqFNGO7vqamubap5dKnn7z1";
+const OWNER_UID = "wnvQPme3u0NU4VVqvr4DGqvv4KE3";
 window.OWNER_UID = OWNER_UID; // ← تصدير: محتاجها js/chat-core.js (appendChatMsg)
 // UID المالك الرسمي — الوحيد المسموح له بتعديل الرتبة
-const VERIFIED_OWNER_UID = "dKTc7vqFNGO7vqamubap5dKnn7z1";
+const VERIFIED_OWNER_UID = "wnvQPme3u0NU4VVqvr4DGqvv4KE3";
 // دالة مساعدة — تتحقق من كلا الـ UID (uppercase + lowercase)
 const _isVerifiedOwner = (uid) =>
   uid && (uid === OWNER_UID || uid === VERIFIED_OWNER_UID);
@@ -5843,7 +5843,7 @@ service cloud.firestore {
     // ── دوال مساعدة ──
     function isOwner() {
       return request.auth != null &&
-        request.auth.uid == "dKTc7vqFNGO7vqamubap5dKnn7z1";
+        request.auth.uid == "wnvQPme3u0NU4VVqvr4DGqvv4KE3";
     }
     function isAdmin() {
       return request.auth != null && (
