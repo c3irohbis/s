@@ -538,7 +538,6 @@
     _buildShell();
     // Reuse the active reminder snapshot, not this module's potentially old array.
     _load();
-    if (_loaded && _isAdmin() && _attLinkWid !== _curWid()) _loadAttLink().then(_renderHome); // تغيّر العالم النشط: أعد قراءة حالة الربط له
   };
 
   window.StudyScheduleModule.close = function () {
