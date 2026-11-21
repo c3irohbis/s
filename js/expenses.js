@@ -321,6 +321,7 @@
 
   window.ExpensesModule._save = async function () {
     if (!_draft) return;
+    const savingUid = _uid(), savingId = _draft.id || null;
     const isTransport = _draft.category === "transport";
     const price = _num(_draft.amount);
     const count = isTransport ? Math.max(1, _num(_draft.tripCount || 1)) : 1;
@@ -340,14 +341,19 @@
     }
     try {
       const { db, collection, doc, addDoc, updateDoc, serverTimestamp } = await _fs();
-      const uid = _uid();
-      if (_draft.id) {
-        await updateDoc(doc(db, "users", uid, "expenses", _draft.id), payload);
+      const uid = savingUid;
+      let id = savingId;
+      if (id) {
+        await updateDoc(doc(db, "users", uid, "expenses", id), payload);
       } else {
-        await addDoc(collection(db, "users", uid, "expenses"), { ...payload, createdAt: serverTimestamp() });
+        const created = await addDoc(collection(db, "users", uid, "expenses"), { ...payload, createdAt: serverTimestamp() });
+        id = created.id;
       }
+      if (uid !== _uid()) return;
+      const existing = _all.find(e=>e.id===id);
+      const updated = {...existing,...payload,id};
+      _all = existing ? _all.map(e=>e.id===id ? updated : e) : [..._all,updated];
       window.toast?.("تم الحفظ بنجاح ✓");
-      await _loadAll();
       _view = "home"; _setTitle("احسب فلوسك ومواصلاتك"); _renderHome();
     } catch (e) {
       window.toast?.("فشل الحفظ — حاول مرة أخرى", "error");
@@ -356,11 +362,14 @@
 
   window.ExpensesModule._delete = async function (id) {
     if (!window.confirm("حذف هذا المصروف؟")) return;
+    const uid = _uid();
     try {
       const { db, doc, deleteDoc } = await _fs();
-      await deleteDoc(doc(db, "users", _uid(), "expenses", id));
+      await deleteDoc(doc(db, "users", uid, "expenses", id));
+      if (uid !== _uid()) return;
+      _all = _all.filter(e=>e.id!==id);
       window.toast?.("تم الحذف");
-      await _loadAll(); _renderHome();
+      _renderHome();
     } catch (e) { window.toast?.("فشل الحذف", "error"); }
   };
 
@@ -442,12 +451,15 @@
     const go = _num(document.getElementById("exTGo")?.value);
     const back = _num(document.getElementById("exTBack")?.value);
     const amount = go + back;
+    const uid = _uid();
     if (amount <= 0) { window.toast?.("أدخل تكلفة الذهاب أو العودة", "error"); return; }
     try {
       const { db, collection, addDoc, serverTimestamp } = await _fs();
-      await addDoc(collection(db, "users", _uid(), "expenses"), { amount, category: "transport", date: _todayStr(), time: "", note: "رحلة يومية (ذهاب وعودة)", createdAt: serverTimestamp() });
+      const payload = { amount, category: "transport", date: _todayStr(), time: "", note: "رحلة يومية (ذهاب وعودة)" };
+      const created = await addDoc(collection(db, "users", uid, "expenses"), { ...payload, createdAt: serverTimestamp() });
+      if (uid !== _uid()) return;
+      _all = [..._all,{...payload,id:created.id}];
       window.toast?.("تم تسجيل رحلة اليوم ✓");
-      await _loadAll();
       _view = "home"; _setTitle("احسب فلوسك ومواصلاتك"); _renderHome();
     } catch (e) { window.toast?.("فشل الحفظ", "error"); }
   };
