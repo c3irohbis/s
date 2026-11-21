@@ -8,3 +8,8 @@ test('attendance history reads one month and preserves lifetime stats with aggre
  assert.equal(ctx._attMonthBounds(2026,12).end,'2027-01-01');assert.equal(ctx._attMonthBounds(2028,2).end,'2028-03-01');
  ctx.getDocs=()=>new Promise(r=>resolve=r);const pending=ctx._loadAttMonth();ctx.window.currentUser={uid:'other'};resolve({forEach:()=>{throw Error('must ignore stale response')}});await pending;assert.equal(renders,1);
 });
+test('offline months are labelled incomplete and aggregate failure is never shown as zero',async()=>{
+ const els={};const ctx={window:{currentUser:{uid:'me'}},_el:id=>els[id]||(els[id]={innerHTML:'',insertAdjacentHTML:(where,text)=>els[id].innerHTML+=text}),_db:()=>({}),_cairoNow:()=>({dateStr:'2026-11-21'}),collection:()=>({}),where:()=>({}),documentId:()=> '__name__',query:(...x)=>x,getDocs:async()=>({metadata:{fromCache:true},forEach:()=>{}}),getCountFromServer:async()=>{throw Error('offline')},_renderAttCalendar:()=>{}};
+ vm.createContext(ctx);vm.runInContext(code,ctx);await ctx.loadAttendanceHistory();assert.ok(els.attCalGrid.innerHTML.includes('بدون اتصال'));assert.ok(els.attHistStats.innerHTML.includes('تعذّر'));assert.ok(!els.attHistStats.innerHTML.includes('0%'));
+ ctx.getDocs=async()=>{throw Error('denied')};await ctx._loadAttMonth();assert.ok(els.attCalGrid.innerHTML.includes('تعذّر'));
+});
