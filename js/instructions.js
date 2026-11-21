@@ -43,6 +43,134 @@
   const MAX_BLOCKS    = 60;
   const MAX_TEXT      = 5000;
 
+  /* ── بوابة بليس (المرحلة 2: كارت تجريبي) ──
+     القراءة من الـ Worker عندما يكون الوضع "gateway"، وأي فشل ← مستمع Firestore الحالي.
+     المزامنة بعد حفظ/حذف المالك لا تمنع العملية أبدًا (try/catch داخلي). */
+  const GW_URL      = "https://bliss-gateway.cairohbis.workers.dev";
+  const GW_CFG_TTL  = 60e3;   // الإعداد يُخزَّن في sessionStorage بحد أقصى 60 ثانية
+  const GW_RECHECK  = 10e3;   // حد أدنى بين إعادات التحقق التلقائية (يُستثنى ما بعد الحفظ)
+  let _gwAbort    = null;     // AbortController للطلب الحالي
+  let _gwInflight = null;     // وعد واحد في الطيران لكل كارت
+  let _gwEtag     = null;
+  let _gwLastFetch = 0;
+  let _gwVisBound = false;
+  let _gwMode     = null;     // "gateway" عندما يعمل مسار البوابة
+
+  async function _gwToken() { return await window.currentUser.getIdToken(); }
+
+  async function _gwConfig() {
+    try {
+      const c = JSON.parse(sessionStorage.getItem("gwCfg") || "null");
+      if (c && c.cards && Date.now() - c.at < GW_CFG_TTL) return c.cards;
+    } catch (_) {}
+    try {
+      const r = await fetch(GW_URL + "/v1/config", { headers: { Authorization: "Bearer " + (await _gwToken()) } });
+      if (!r.ok) return null;
+      const j = await r.json();
+      if (j && j.v === 1 && j.data && j.data.cards) {
+        try { sessionStorage.setItem("gwCfg", JSON.stringify({ at: Date.now(), cards: j.data.cards })); } catch (_) {}
+        return j.data.cards;
+      }
+    } catch (_) {}
+    return null; // أي فشل ← firebase
+  }
+
+  // 2.8: لا يُعتمد ردّ البوابة إلا بغلاف سليم كامل، وإلا تُرفض البيانات
+  function _gwValidPayload(j) {
+    if (!j || j.v !== 1 || !j.meta || j.meta.complete !== true) return false;
+    if (!Array.isArray(j.data) || j.meta.count !== j.data.length) return false;
+    if (!j.meta.generatedAt || Date.now() - j.meta.generatedAt > 5 * 60e3) return false;
+    for (const d of j.data) {
+      if (!d || typeof d.featureKey !== "string" || typeof d.featureTitle !== "string" || !Array.isArray(d.blocks)) return false;
+      for (const b of d.blocks) if (!b || !["h", "p", "img"].includes(b.t) || typeof b.v !== "string") return false;
+    }
+    return true;
+  }
+
+  function _gwRenderFromDocs() {
+    if (_view === "list") _renderList();
+    else if (_view === "read") { if (_docs[_curKey]) _renderRead(); else _goList(); }
+  }
+
+  function _gwToFirebase() { _gwMode = "firebase"; _fsStart(); }
+
+  async function _gwFetch(force) {
+    if (_gwInflight) return _gwInflight;
+    if (!force && Date.now() - _gwLastFetch < GW_RECHECK) return;
+    _gwLastFetch = Date.now();
+    if (_gwAbort) _gwAbort.abort();
+    const ac = _gwAbort = new AbortController();
+    _gwInflight = (async () => {
+      for (let attempt = 0; attempt < 3; attempt++) { // إعادتان كحد أقصى، على 5xx/الشبكة فقط
+        try {
+          const r = await fetch(GW_URL + "/v1/content/instructions", {
+            signal: ac.signal,
+            headers: { Authorization: "Bearer " + (await _gwToken()), ...(_gwEtag ? { "If-None-Match": _gwEtag } : {}) },
+          });
+          if (r.status === 304) { _gwRenderFromDocs(); return; }
+          if (r.status === 503 || (r.status >= 400 && r.status < 500)) { _gwToFirebase(); return; } // disabled أو 4xx: فورًا وبلا إعادة
+          if (!r.ok) throw new Error("gw-" + r.status);
+          const j = await r.json();
+          if (!_gwValidPayload(j)) { _gwToFirebase(); return; }
+          _gwEtag = r.headers.get("ETag") || j.etag || _gwEtag;
+          _docs = {};
+          j.data.forEach(d => { _docs[d.featureKey] = { id: d.featureKey, ...d }; });
+          _gwRenderFromDocs();
+          return;
+        } catch (e) {
+          if (e && e.name === "AbortError") return; // إلغاء عمدي (إغلاق الكارت أو إعادة فتحه)
+          if (attempt >= 2) { _gwToFirebase(); return; }
+          await new Promise(res => setTimeout(res, 1000 * (attempt + 1))); // تباعد متصاعد
+        }
+      }
+    })();
+    try { await _gwInflight; } finally { _gwInflight = null; }
+  }
+
+  function _gwBindVisibility() {
+    if (_gwVisBound) return; _gwVisBound = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && _gwMode === "gateway" && _root() && _root().classList.contains("instructions-open"))
+        _gwFetch(false);
+    });
+  }
+
+  // مزامنة بعد حفظ/حذف المالك — منفصلة تمامًا عن نجاح الحفظ نفسه
+  async function _gwSync(key) {
+    try {
+      const r = await fetch(GW_URL + "/v1/admin/sync/instructions", {
+        method: "POST",
+        signal: AbortSignal.timeout(15000),
+        headers: { Authorization: "Bearer " + (await _gwToken()), "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      if (!r.ok) throw new Error("sync-" + r.status);
+      _gwPendingClear(key);
+    } catch (e) {
+      window.toast?.("تعثّرت المزامنة الاحتياطية — ستُعاد تلقائيًا عند فتح الكارت", "error");
+      _gwPendingAdd(key);
+    }
+  }
+  function _gwPendingAdd(key) {
+    try {
+      const p = JSON.parse(localStorage.getItem("gwPendingSync") || "[]");
+      if (!p.includes(key)) { p.push(key); localStorage.setItem("gwPendingSync", JSON.stringify(p)); }
+    } catch (_) {}
+  }
+  function _gwPendingClear(key) {
+    try {
+      const p = JSON.parse(localStorage.getItem("gwPendingSync") || "[]").filter(k => k !== key);
+      localStorage.setItem("gwPendingSync", JSON.stringify(p));
+    } catch (_) {}
+  }
+  // المفاتيح المعلّقة تُعاد عند فتح المالك للكارت (2.3ب)
+  function _gwRetryPending() {
+    let p;
+    try { p = JSON.parse(localStorage.getItem("gwPendingSync") || "[]"); } catch (_) { p = []; }
+    if (!Array.isArray(p) || !p.length) return;
+    [...p].forEach(key => _gwSync(key));
+  }
+
   function _esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
@@ -121,7 +249,7 @@
     });
   }
 
-  async function _startListener() {
+  async function _fsStart() {
     if (_unsub) return;
     try {
       const { db, collection, onSnapshot } = await _getFS();
@@ -132,6 +260,19 @@
         else if (_view === "read") { if (_docs[_curKey]) _renderRead(); else _goList(); }
       }, () => _fail());
     } catch (e) { _fail(); }
+  }
+
+  async function _startListener() {
+    if (_unsub) return;
+    const cards = await _gwConfig(); // null أو غياب المفتاح ← firebase
+    const mode = (cards && cards.instructions) || "firebase";
+    _gwMode = mode;
+    if (mode === "gateway") {
+      _gwBindVisibility();
+      await _gwFetch(true); // عند أي فشل يستدعي _gwToFirebase() داخليًا
+      return;
+    }
+    _fsStart(); // firebase وshadow: السلوك الحالي كما هو
   }
   function _fail() {
     const b = _body();
@@ -439,6 +580,8 @@
       };
       if (!_docs[_draft.key]) payload.createdAt = serverTimestamp();
       await setDoc(doc(db, COL, _draft.key), payload, { merge: true });
+      await _gwSync(_draft.key);            // زر الحفظ معطّل أثناءها؛ لا تمنع الحفظ عند فشلها
+      if (_gwMode === "gateway") await _gwFetch(true);
       window.toast?.("تم الحفظ ✓");
       _goList();
     } catch (e) {
@@ -458,6 +601,7 @@
     try {
       const { db, doc, deleteDoc } = await _getFS();
       await deleteDoc(doc(db, COL, key));
+      await _gwSync(key);                   // حذف ناعم في Supabase؛ لا يمنع الحذف عند فشلها
       window.toast?.("تم الحذف");
     } catch (e) {
       window.toast?.("فشل الحذف", "error");
@@ -481,6 +625,7 @@
     root.style.display = "flex";
     _buildShell();
     _setHeader("تعليمات", true);
+    if (_isOwnerUser()) _gwRetryPending();
     _startListener();
   };
 
@@ -491,6 +636,7 @@
     root.style.display = "none";
     root.innerHTML = "";
     if (_unsub) { _unsub(); _unsub = null; }
+    if (_gwAbort) { _gwAbort.abort(); _gwAbort = null; }
     _docs = {}; _draft = null; _view = "list"; _curKey = null;
   };
 
