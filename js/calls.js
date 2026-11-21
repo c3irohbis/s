@@ -16,6 +16,13 @@
   var SDK_URL = "https://cdn.jsdelivr.net/npm/livekit-client@2.22.4/dist/livekit-client.umd.js";
 
   var lkRoom = null, active = false, starting = false, timerId = null, t0 = 0, audioEls = {}, videoEls = {}, callUid = null, camOn = false;
+  /* إشارات الرنين عبر مستند activeCalls/{calleeUid} — الاسم جوّاه (صفر قراءات إضافية)،
+     مستمع واحد لكل مستخدم، والمدة تتحسب محليًا من لحظة الاتصال عند كل طرف */
+  var fsP = null, callCtx = null, sigUnsub = null, ringTimer = null, inboxUnsub = null, inboxUid = null, incomingData = null;
+  function fs() { if (!fsP) fsP = import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js"); return fsP; }
+  function myName() { var me = window.currentUser; return ((window._currentUserData && window._currentUserData.name) || (me && me.displayName) || "مستخدم"); }
+  function fmtDur(ms) { var s = Math.max(0, Math.floor(ms / 1000)); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); }
+  function sigStop() { if (sigUnsub) { try { sigUnsub(); } catch (e) {} sigUnsub = null; } if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; } }
 
   function toast(msg, type) { try { window.toast && window.toast(msg, type || "error"); } catch (e) {} }
   function $(id) { return document.getElementById(id); }
@@ -91,7 +98,7 @@
       '<button type="button" id="bisCallEnd" class="bis-call-btn bis-call-end" title="إنهاء">📞</button>' +
       '</div></div>';
     document.body.appendChild(o);
-    $("bisCallEnd").addEventListener("click", function () { end(); });
+    $("bisCallEnd").addEventListener("click", function () { end(true); });
     $("bisCallMute").addEventListener("click", toggleMute);
     $("bisCallCam").addEventListener("click", toggleCam);
     return o;
@@ -169,25 +176,173 @@
     setCam(!camOn).catch(function (e) { toast(errText(e)); });
   }
 
-  async function end() {
+  /* writeSig=true ⇒ نبلغ الطرف التاني (إنهاء أثناء المكالمة = update، إلغاء أثناء الرنين = حذف) */
+  async function end(writeSig, durMs) {
     if (timerId) { clearInterval(timerId); timerId = null; }
+    var dur = (typeof durMs === "number") ? durMs : (t0 ? Date.now() - t0 : 0);
+    var ctx = callCtx; callCtx = null;
+    sigStop();
+    if (writeSig && ctx && ctx.ref) {
+      try {
+        var F = await fs();
+        if (active) await F.updateDoc(ctx.ref, { state: "ended" });
+        else await F.deleteDoc(ctx.ref);
+      } catch (e) {}
+    }
     var r = lkRoom; lkRoom = null; active = false; starting = false; callUid = null;
     try { if (r) await r.disconnect(); } catch (e) {}
     cleanupAudio(); cleanupVideo();
-    try { showOverlay(false); } catch (e) {}
+    t0 = 0;
+    if (dur > 0) { setStatus("انتهت المكالمة · " + fmtDur(dur)); setTimeout(function () { try { showOverlay(false); } catch (e) {} }, 2500); }
+    else { try { showOverlay(false); } catch (e) {} }
     refreshBtn();
+  }
+
+  /* ── مستمع المكالمات الواردة: مستند واحد لكل مستخدم، بيقرأ بس عند التغيير ── */
+  async function ensureInbox() {
+    var uid = curUid();
+    if (uid === inboxUid) return;
+    if (inboxUnsub) { try { inboxUnsub(); } catch (e) {} inboxUnsub = null; }
+    if (!uid || !window.db) return; /* db مش جاهز لسه: نحاول تاني مع التيك الجاي */
+    inboxUid = uid;
+    var F = await fs();
+    if (inboxUid !== uid || !curUid()) return;
+    inboxUnsub = F.onSnapshot(F.doc(window.db, "activeCalls", uid), onIncoming, function () {});
+  }
+
+  function onIncoming(snap) {
+    try {
+      if (!snap.exists()) { hideIncoming(); return; }
+      var d = snap.data() || {};
+      if (d.state === "ringing") {
+        var fresh = (d.ts && typeof d.ts.toMillis === "function") ? (Date.now() - d.ts.toMillis() < 60000) : true;
+        if (!fresh) return;
+        if (active || starting || callCtx) { /* مشغول ⇒ رفض تلقائي */
+          fs().then(function (F) { return F.updateDoc(F.doc(window.db, "activeCalls", inboxUid), { state: "declined", reason: "busy" }); }).catch(function () {});
+          return;
+        }
+        showIncoming(d);
+      } else { hideIncoming(); }
+    } catch (e) {}
+  }
+
+  /* ── واجهة المكالمة الواردة (نفس نظام الزجاج بتاع الموقع) ── */
+  function ensureIncoming() {
+    if ($("bisIncomingOverlay")) return $("bisIncomingOverlay");
+    var o = document.createElement("div");
+    o.id = "bisIncomingOverlay";
+    o.setAttribute("dir", "rtl");
+    o.innerHTML =
+      '<div class="bis-call-card">' +
+      '<div class="bis-call-title"><i class="fa-solid fa-phone-volume"></i><span>مكالمة واردة</span></div>' +
+      '<div class="bis-call-inc-name" id="bisIncName">مستخدم</div>' +
+      '<div class="bis-call-status">يريد بدء مكالمة معك</div>' +
+      '<div class="bis-call-actions">' +
+      '<button type="button" id="bisIncAccept" class="bis-call-btn bis-call-accept" title="رد">📞</button>' +
+      '<button type="button" id="bisIncDecline" class="bis-call-btn bis-call-end" title="رفض">📞</button>' +
+      '</div></div>';
+    document.body.appendChild(o);
+    $("bisIncAccept").addEventListener("click", acceptIncoming);
+    $("bisIncDecline").addEventListener("click", declineIncoming);
+    return o;
+  }
+  function showIncoming(d) {
+    incomingData = d;
+    var o = ensureIncoming();
+    $("bisIncName").textContent = d.callerName || "مستخدم";
+    o.style.display = "flex";
+  }
+  function hideIncoming() { incomingData = null; var o = $("bisIncomingOverlay"); if (o) o.style.display = "none"; }
+
+  /* الرد: تحديث المستند ثم دخول فوري — الطرفين بيشوفوا "جاري الاتصال" في نفس اللحظة */
+  async function acceptIncoming() {
+    var d = incomingData; if (!d) return;
+    hideIncoming();
+    try {
+      var F = await fs();
+      var ref = F.doc(window.db, "activeCalls", inboxUid);
+      await F.updateDoc(ref, { state: "accepted" });
+      callCtx = { ref: ref, peerUid: d.callerUid, role: "callee", title: d.callerName || "مكالمة" };
+      sigUnsub = F.onSnapshot(ref, onSignal, function () {});
+      join({ kind: "dm", peerUid: d.callerUid }, null, callCtx.title);
+    } catch (e) { toast(errText(e)); }
+  }
+  async function declineIncoming() {
+    var d = incomingData; hideIncoming();
+    if (!d) return;
+    try { var F = await fs(); await F.updateDoc(F.doc(window.db, "activeCalls", inboxUid), { state: "declined" }); } catch (e) {}
+  }
+
+  /* ── الرنين الصادر ── */
+  async function startDm(target, opts) {
+    starting = true; callUid = curUid();
+    if (!callUid) throw new Error("not-signed-in");
+    showOverlay(true);
+    var title = (document.getElementById("chatTopName") || {}).textContent;
+    title = title ? title.trim() : "مكالمة";
+    $("bisCallTitle").textContent = title;
+    setStatus("جاري الرنين…");
+    var F = await fs();
+    var ref = F.doc(window.db, "activeCalls", target.peerUid);
+    callCtx = { ref: ref, peerUid: target.peerUid, role: "caller", title: title, opts: opts || null };
+    await F.setDoc(ref, { callerUid: callUid, callerName: myName(), calleeUid: target.peerUid, state: "ringing", ts: F.serverTimestamp() });
+    sigUnsub = F.onSnapshot(ref, onSignal, function () {});
+    ringTimer = setTimeout(function () { finishSignal("لا يوجد رد", true); }, 45000);
+    /* إشعار خارجي بالمسار الحالي (احتياطي لو الطرف التاني مش فاتح التطبيق) */
+    if (typeof window._sendNotification === "function") {
+      try {
+        window._sendNotification(target.peerUid, "📞 مكالمة من " + myName(), "افتح التطبيق للرد على المكالمة",
+          { type: "call", chatType: "call", senderUid: callUid, tag: "call_" + callUid });
+      } catch (e) {}
+    }
+  }
+
+  function onSignal(snap) {
+    if (!callCtx) return;
+    if (!snap.exists()) { finishSignal(null, false); return; } /* الطرف التاني قفل/مسح */
+    var d = snap.data() || {};
+    if (d.state === "accepted" && callCtx.role === "caller" && starting) {
+      if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; }
+      join({ kind: "dm", peerUid: callCtx.peerUid }, callCtx.opts, callCtx.title);
+    } else if (d.state === "declined") {
+      /* الرفض يخصنا بس واحنا لسه بنرن — بعد الاتصال بيكون رنين تاني اترد عليه تلقائيًا */
+      if (starting) finishSignal(d.reason === "busy" ? "الطرف الآخر مشغول حاليًا" : "تم رفض المكالمة", false);
+    } else if (d.state === "ended") {
+      finishSignal(null, false);
+    }
+  }
+
+  /* إنهاء بسبب إشارة من الطرف التاني: يقفل هنا فورًا ويبان مدة المكالمة محليًا */
+  function finishSignal(msg, isTimeout) {
+    var dur = t0 ? (Date.now() - t0) : 0;
+    var ctx = callCtx; callCtx = null;
+    sigStop();
+    if (msg) toast(msg);
+    if (isTimeout && ctx && ctx.ref) { try { fs().then(function (F) { return F.deleteDoc(ctx.ref); }).catch(function () {}); } catch (e) {} }
+    end(false, dur);
   }
 
   async function start(target, opts) {
     if (active || starting) { showOverlay(true); return; }
     target = target || currentTarget();
     if (!target) { toast("المكالمات متاحة في الرسائل الخاصة والغرف فقط"); return; }
+    try {
+      if (target.kind === "dm") await startDm(target, opts || null); /* DM: رنين أولًا ثم اتصال بعد الرد */
+      else await join(target, opts || null, null); /* الغرف: دخول مباشر */
+    } catch (e) {
+      if (!e || e.message !== "user-changed") toast(errText(e));
+      await end(true);
+    }
+  }
+
+  async function join(target, opts, titleText) {
+    if (active) return;
     starting = true; callUid = curUid();
     try {
       if (!callUid) throw new Error("not-signed-in");
       showOverlay(true); setStatus("جاري الاتصال…");
-      var title = (document.getElementById("chatTopName") || {}).textContent;
-      $("bisCallTitle").textContent = title ? title.trim() : "مكالمة";
+      if (titleText) $("bisCallTitle").textContent = titleText;
+      else if (!$("bisCallTitle").textContent) $("bisCallTitle").textContent = "مكالمة";
 
       var results = await Promise.all([loadSdk(), fetchToken(target)]);
       var LK = results[0], tk = results[1];
@@ -219,7 +374,7 @@
       room.on(LK.RoomEvent.ParticipantConnected, renderParts);
       room.on(LK.RoomEvent.ParticipantDisconnected, renderParts);
       room.on(LK.RoomEvent.ActiveSpeakersChanged, renderParts);
-      room.on(LK.RoomEvent.Disconnected, function () { if (active) end(); });
+      room.on(LK.RoomEvent.Disconnected, function () { if (active) end(true); });
 
       await room.connect(tk.url, tk.token);
       if (lkRoom !== room) { try { await room.disconnect(); } catch (e) {} return; } /* أُنهيت أثناء الاتصال */
@@ -230,25 +385,17 @@
 
       active = true; starting = false; t0 = Date.now();
       timerId = setInterval(tick, 1000); tick(); renderParts(); refreshBtn();
-
-      /* رنين لطرف الـ DM عبر مسار الإشعارات الحالي (لا تعديل عليه) */
-      if (target.kind === "dm" && typeof window._sendNotification === "function") {
-        try {
-          var me = window.currentUser, myName = (window._currentUserData && window._currentUserData.name) || (me && me.displayName) || "مستخدم";
-          window._sendNotification(target.peerUid, "📞 مكالمة من " + myName, "اضغط للدخول للمحادثة والانضمام للمكالمة",
-            { type: "call", chatType: "call", senderUid: me ? me.uid : "", tag: "call_" + (me ? me.uid : "") });
-        } catch (e) {}
-      }
     } catch (e) {
       if (!e || e.message !== "user-changed") toast(errText(e));
-      await end();
+      await end(true);
     }
   }
 
   /* ── زر المكالمة في هيدر الشات (يُحقن بدون تعديل HTML الحالي) ── */
   function refreshBtn() {
     try {
-      if ((active || starting) && curUid() !== callUid) end(); /* خروج/تبديل حساب */
+      if ((active || starting) && curUid() !== callUid) end(true); /* خروج/تبديل حساب */
+      ensureInbox(); /* مستمع المكالمات الواردة (مرة واحدة لكل حساب) */
       /* أيقونة الاتصال الموجودة أصلًا في هيدر الشات الجديد (.call-circle) */
       var btn = $("chatCallBtn");
       if (!btn) {
@@ -290,14 +437,18 @@
       ".bis-call-vid.local{position:absolute;bottom:6px;inset-inline-start:6px;width:86px;z-index:2;box-shadow:0 4px 14px rgba(0,0,0,.4)}" +
       ".bis-call-vid.local:only-child{position:static;width:auto}" +
       ".bis-call-vid.local video{transform:scaleX(-1)}" +
-      "#bisCallOverlay:has(.bis-call-videos:not([style*='none'])) .bis-call-card{width:min(94vw,640px)}";
+      "#bisCallOverlay:has(.bis-call-videos:not([style*='none'])) .bis-call-card{width:min(94vw,640px)}" +
+      "#bisIncomingOverlay{position:fixed;inset:0;z-index:99991;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:20px}" +
+      ".bis-call-inc-name{font-size:20px;font-weight:900;color:var(--text)}" +
+      ".bis-call-accept{background:var(--success);border-color:var(--success);color:#fff;animation:bisRing 1.2s ease-in-out infinite}" +
+      "@keyframes bisRing{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}";
     document.head.appendChild(st);
   }
 
   window.BisCalls = {
     start: start,
     startVideo: function (target) { start(target, { video: true }); },
-    end: end,
+    end: function () { return end(true); },
     isActive: function () { return active; }
   };
 
