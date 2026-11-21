@@ -150,7 +150,7 @@
       return;
     }
     _listeningWorldId = _w;
-    import("./schedule-repository.js?v=1").then(function (mod) {
+    import("./schedule-repository.js?v=2").then(function (mod) {
       if (myGen !== _gen) return; // جيل الحالة اتغيّر أثناء تحميل الموديول — تجاهل النتيجة
       try {
         var _worldId = _w;

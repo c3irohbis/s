@@ -137,7 +137,7 @@
       // عناصر بلا worldId (قديمة) لا تُفترض تابعة لأي عالم، فتُستبعد من الجميع بلا استثناء.
       const _worldId = (typeof window.activeWorldContext === "function") ? window.activeWorldContext() : null;
       const uid = window.currentUser?.uid;
-      const { getSchedule } = await import("./schedule-repository.js?v=1");
+      const { getSchedule } = await import("./schedule-repository.js?v=2");
       const snap = await getSchedule(db, _worldId, uid);
       if (generation !== _loadGeneration || uid !== window.currentUser?.uid || _worldId !== _curWid()) return;
       _lectures = [];
