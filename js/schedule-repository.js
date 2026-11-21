@@ -18,7 +18,7 @@ export function subscribeSchedule(db, world, uid, next, error) {
   const e = entryFor(db,world,uid), listener = {next,error};
   e.listeners.add(listener);
   if (!e.stop) {
-    e.stop = onSnapshot(scheduleQuery(e), snap => {
+    e.stop = onSnapshot(scheduleQuery(e), {includeMetadataChanges:true}, snap => {
       if (!e.listeners.size) return;
       e.snapshot = !snap.metadata?.fromCache && !snap.metadata?.hasPendingWrites ? snap : null;
       for (const l of e.listeners) l.next(snap);
