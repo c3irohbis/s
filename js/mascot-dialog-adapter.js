@@ -7,10 +7,9 @@
       اللي originalConfirm بترجعه بالظبط، مفيش أي لمس لقيمة الـ resolve.
 
    2) فيه طريقتين استدعاء في المشروع: window.confirm (Bare، 8 استدعاء جوه
-      index.html) وwindow._appConfirm (3 ملفات خارجية: announcement.js,
-      attendance.js, notif-permission.js). الاتنين بيشاوروا على نفس الدالة
-      الأصلية وقت التحميل، فالـ Adapter بيلف الاتنين معًا بنفس المنطق،
-      وإلا الملفات الخارجية مش هتستفيد من التحسين.
+      index.html) وwindow._appConfirm (للملفات الخارجية).
+      _appConfirm هو الحوار غير المتزامن الخاص بالتطبيق.
+      window.confirm الأصلي يظل متزامنًا للمستهلكين الذين ينتظرون boolean.
    ========================================================================= */
 (function () {
   "use strict";
@@ -36,7 +35,7 @@
   window.__mascotDialogAdapterLoaded = true;
 
   // نفس القيمة اللي window._appConfirm بيشاور عليها حاليًا (نسخة واحدة أصلية)
-  var originalConfirm = window.confirm;
+  var originalConfirm = window._appConfirm;
 
   var mascotInstance = null;
 
@@ -75,8 +74,7 @@
     return resultPromise; // نفس الـ Promise اللي originalConfirm كانت هترجعه بالظبط
   }
 
-  // نلف الاتنين معًا — window.confirm (للاستدعاءات المباشرة جوه index.html)
-  // وwindow._appConfirm (للملفات الخارجية التلاتة)
-  window.confirm = wrappedConfirm;
+  // Decorate only the application dialog, never the native browser dialog.
+  // Keep the native synchronous window.confirm unchanged for callers that expect a boolean.
   window._appConfirm = wrappedConfirm;
 })();
