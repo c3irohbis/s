@@ -57,6 +57,8 @@ function _refreshPollCard(docId, poll) {
   if (newCard) card.replaceWith(newCard);
 }
 
+window._refreshPollCard = _refreshPollCard;
+
 // ── التصويت في الاستطلاع ──
 window.castPollVote = async function(docId, optionIndex) {
   if (!window.currentUser?.uid) return;
@@ -87,6 +89,7 @@ window.castPollVote = async function(docId, optionIndex) {
 const _pollListeners = {}; // docId → unsub
 
 function _ensurePollListener(docId) {
+  if (window._chatOwnsMessageUpdates) return;
   if (_pollListeners[docId]) return;
   const colPath = window.chatColPath(window._currentChatId);
   const msgRef  = doc(window.db, colPath, docId);
