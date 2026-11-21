@@ -60,6 +60,8 @@
   let _subjects = [];        // كل مواد العالم (نشطة ومؤرشفة)
   let _sheets = [];          // شيتات المادة المفتوحة حاليًا
   let _completions = {};     // sheetId -> {completed, completedAt}
+  let _knownCompletionIds = new Set();
+  let _subjectGeneration = 0;
   let _completionsUid = null; // الحساب اللي _completions اتحمّلت له كاملة بنجاح (null = غير محمّلة → لازم قراءة)
   let _loaded = false;
   let _loadedUid = null;      // الحساب اللي اتحمّلت بياناته آخر مرة — لحماية تبديل الحساب/الـWorld
@@ -150,34 +152,45 @@
   /* ─────────────────────────────────────────
      فتح مادة: تحميل الشيتات + إنجاز المستخدم
   ───────────────────────────────────────── */
+  async function _loadCompletionIds(fns, uid, ids) {
+    const {db,collection,getDocs,query,where,documentId} = fns;
+    const results = [];
+    for (let i=0;i<ids.length;i+=30) {
+      const batch = ids.slice(i,i+30);
+      const snap = await getDocs(query(collection(db, `users/${uid}/sheetCompletions`), where(documentId(), "in", batch)));
+      results.push({ids:batch,snap});
+    }
+    return results;
+  }
   window.SheetatyModule._openSubject = async function (subjectId) {
-    _currentSubjectId = subjectId;
-    _view = "subject";
-    const subj = _subjects.find((s) => s.id === subjectId);
+    const generation = ++_subjectGeneration, uid = _uid(), world = _worldId();
+    const current = () => generation === _subjectGeneration && uid === _uid() && world === _worldId() && _currentSubjectId === subjectId;
+    _currentSubjectId = subjectId; _view = "subject";
+    const subj = _subjects.find(s=>s.id===subjectId);
     _setTitle(subj ? subj.name : "المادة");
     const body = _body();
     if (body) body.innerHTML = `<div class="sht-loading"><div class="sht-spin"></div></div>`;
     try {
-      const { db, collection, getDocs, query, where, orderBy } = await _fs();
-      const sheetsSnap = await getDocs(query(collection(db, COL_SHEETS), where("subjectId", "==", subjectId), where("worldId", "==", subj.worldId), orderBy("order")));
-      _sheets = [];
-      sheetsSnap.forEach((d) => _sheets.push({ id: d.id, ...d.data() }));
-
-      const uid = _uid();
-      // إعادة استخدام إنجازات المستخدم نفسه المحمّلة بنجاح (بدل قراءة المجموعة كاملة مع كل مادة).
-      // القراءة الجديدة تحصل فقط لو: الحساب مختلف / لم تُحمَّل بنجاح بعد / اتصفّرت (فتح الموديول، _resetState).
+      if (!uid || !world || !subj || subj.worldId !== world) throw new Error("Invalid subject context");
+      const fns = await _fs();
+      const {db,collection,getDocs,query,where,orderBy} = fns;
+      const sheetsSnap = await getDocs(query(collection(db, COL_SHEETS), where("subjectId", "==", subjectId), where("worldId", "==", world), orderBy("order")));
+      if (!current()) return;
+      const sheets = sheetsSnap.docs.map(d=>({id:d.id,...d.data()}));
       if (_completionsUid !== uid) {
-        _completions = {};          // لا نحتفظ ببيانات حساب سابق، ولا بحالة ناقصة لو فشلت القراءة
-        _completionsUid = null;
-        if (uid) {
-          const compSnap = await getDocs(collection(db, `users/${uid}/sheetCompletions`));
-          compSnap.forEach((d) => { _completions[d.id] = d.data(); });
-          _completionsUid = uid;    // تُعتمد فقط بعد نجاح القراءة كاملة
-        }
+        _completions = {}; _knownCompletionIds.clear(); _completionsUid = uid;
       }
+      const ids = sheets.map(sh=>sh.id).filter(id=>!_knownCompletionIds.has(id));
+      const results = await _loadCompletionIds(fns,uid,ids);
+      if (!current()) return;
+      results.forEach(({ids,snap})=>{
+        ids.forEach(id=>{delete _completions[id];if(!snap.metadata?.fromCache)_knownCompletionIds.add(id);});
+        snap.forEach(d=>{_completions[d.id]=d.data();});
+      });
+      _sheets = sheets;
       _renderSubject();
-    } catch (e) {
-      if (body) body.innerHTML = `<div class="sht-empty"><div class="sht-empty-title">تعذّر تحميل شيتات المادة</div></div>`;
+    } catch(e) {
+      if (current() && body) body.innerHTML = `<div class="sht-empty"><div class="sht-empty-title">تعذّر تحميل شيتات المادة</div></div>`;
     }
   };
 
@@ -511,7 +524,7 @@
   window.SheetatyModule._back = function () {
     if (_view === "subjectForm") { _currentSubjectId ? _renderSubject() : _renderHome(); return; }
     if (_view === "sheetForm") { _renderSubject(); return; }
-    if (_view === "subject") { _currentSubjectId = null; _renderHome(); return; }
+    if (_view === "subject") { ++_subjectGeneration; _currentSubjectId = null; _renderHome(); return; }
     window.SheetatyModule.close();
   };
 
@@ -525,6 +538,7 @@
     if (_loaded) _renderHome(); else _load();
   };
   window.SheetatyModule.close = function () {
+    ++_subjectGeneration;
     const root = _root();
     if (!root) return;
     root.classList.remove("sht-open");
