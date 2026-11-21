@@ -1303,14 +1303,14 @@ if ("serviceWorker" in navigator) {
           <div class="owner-collapse-icon-wrap"><i class="fa-solid fa-chart-line"></i></div>
           <div class="owner-collapse-body-text">
             <div class="owner-collapse-title">لوحة التحليلات</div>
-            <div class="owner-collapse-sub">نشاط الرسائل · نمو المستخدمين · مباشر</div>
+            <div class="owner-collapse-sub">نشاط الرسائل · نمو المستخدمين · عند الطلب</div>
           </div>
           <i class="fa-solid fa-chevron-down owner-collapse-arrow"></i>
         </div>
         <div class="owner-collapse-panel">
           <div class="owner-collapse-inner">
             <div class="analytics-sec" id="analyticsSec">
-              <p class="label" id="analyticsReadNotice">التحليلات التفصيلية لا تُحمّل تلقائيًا لتوفير القراءات. تحميلها أو تغيير الفترة يقرأ سجل الرسائل والمستخدمين كاملًا حتى تتوفر ملخصات الخادم.</p>
+              <p class="label" id="analyticsReadNotice" style="color:var(--text);line-height:1.8;">التحليلات التفصيلية لا تُحمّل تلقائيًا لتوفير القراءات. تحميلها أو تغيير الفترة يقرأ سجل الرسائل والمستخدمين كاملًا حتى تتوفر ملخصات الخادم.</p>
               <button class="btn btn-gold" type="button" onclick="loadOwnerAnalytics()">تحميل التحليلات التفصيلية</button>
 
               <!-- Period Tabs -->
@@ -3188,19 +3188,25 @@ async function _getAllUsers() {
 }
 window._getAllUsers = _getAllUsers;
 
-// أعضاء عالمي + المالك فقط (استعلام where بدل جلب كل المستخدمين ثم الفلترة) — عند أي فشل: الطريقة القديمة
+// Share the complete world result without broadening a failed scoped query.
+// Pagination/substring search is a separate migration, not a silent result cap.
 let _worldUsersCache = null, _worldUsersCacheTs = 0, _worldUsersCacheW = null;
+let _worldUsersCacheUid = null, _worldUsersPending = null;
 async function _getWorldUsers() {
   const w = window.activeWorldContext?.() || null;
-  if (_worldUsersCache && _worldUsersCacheW === w && Date.now() - _worldUsersCacheTs < CACHE_TTL_MS) return _worldUsersCache;
-  let list;
-  try {
+  const uid = window.currentUser?.uid || null;
+  if (!uid) throw new Error("Directory requires a signed-in account");
+  const current = () => window.currentUser?.uid === uid && (window.activeWorldContext?.() || null) === w;
+  if (_worldUsersCache && _worldUsersCacheUid === uid && _worldUsersCacheW === w && Date.now() - _worldUsersCacheTs < CACHE_TTL_MS) return _worldUsersCache;
+  if (_worldUsersPending?.uid === uid && _worldUsersPending.w === w) return _worldUsersPending.promise;
+  const pending = { uid, w, promise: null };
+  pending.promise = (async () => {
     const [ws, os] = await Promise.all([
       w ? getDocs(query(collection(db, "users"), where("worldId", "==", w))) : null,
       getDoc(doc(db, "users", OWNER_UID))
     ]);
-    const seen = new Set();
-    list = [];
+    if (!current()) throw new Error("Directory context changed");
+    const seen = new Set(), list = [];
     [...(ws ? ws.docs : []), ...(os.exists() ? [os] : [])].forEach(d => {
       if (seen.has(d.id)) return;
       seen.add(d.id);
@@ -3208,11 +3214,11 @@ async function _getWorldUsers() {
       _userCache[d.id] = { data: u, ts: Date.now() };
       list.push(u);
     });
-  } catch (e) {
-    list = (await _getAllUsers()).filter(u => (u.uid || u.id) === OWNER_UID || (!!w && u.worldId === w));
-  }
-  _worldUsersCache = list; _worldUsersCacheW = w; _worldUsersCacheTs = Date.now();
-  return list;
+    _worldUsersCache = list; _worldUsersCacheW = w; _worldUsersCacheUid = uid; _worldUsersCacheTs = Date.now();
+    return list;
+  })().finally(() => { if (_worldUsersPending === pending) _worldUsersPending = null; });
+  _worldUsersPending = pending;
+  return pending.promise;
 }
 window._getWorldUsers = _getWorldUsers;
 
@@ -6352,8 +6358,8 @@ try { window._listenPinnedMsg?.(); } catch(e) {}
 <script type="module" src="js/report.js"></script>
 <script type="module" src="js/library.js"></script>
 <script type="module" src="js/poll.js?v=read-head-1"></script>
-<script type="module" src="js/members-list.js?v=2"></script>
-<script type="module" src="js/mention.js?v=2"></script>
+<script type="module" src="js/members-list.js?v=scoped-3"></script>
+<script type="module" src="js/mention.js?v=scoped-3"></script>
 <script type="module" src="js/dms-page.js?v=5"></script>
 <script type="module" src="js/dm-extras.js?v=unread-anchor-1"></script>
 <script src="js/chat-presence-text.js?v=2"></script>

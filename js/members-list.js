@@ -4,6 +4,7 @@
    منقول من index.html — راجع BIS-split-log.md لتفاصيل الاستلاف
 ══════════════════════════════════════════ */
 let _membersSearchDebounce = null;
+let _membersRenderGeneration = 0;
 let _allMembersCache = null;
 let _allMembersCacheTs = 0;
 
@@ -17,13 +18,18 @@ document.getElementById("dmsSearchInp")?.addEventListener("input", e => {
 });
 
 async function renderMembersList(q, containerId = "dmsMembersList") {
+  const generation = ++_membersRenderGeneration;
+  const uidAtStart = window.currentUser?.uid;
+  const worldAtStart = window.activeWorldContext?.();
   const el = document.getElementById(containerId);
   if (!el) return;
 
   el.innerHTML = (window._buildMemberSkeletons ? window._buildMemberSkeletons(7) : `<div class="spinner" style="margin:30px auto;"></div>`);
 
   try {
-    const all = window._getWorldUsers ? await window._getWorldUsers() : await window._getAllUsers();
+    if (!window._getWorldUsers) throw new Error("Scoped directory unavailable");
+    const all = await window._getWorldUsers();
+    if (generation !== _membersRenderGeneration || uidAtStart !== window.currentUser?.uid || worldAtStart !== window.activeWorldContext?.()) return;
 
     // ✅ World Isolation: أعضاء العالم الحالي فقط + الـOwner (Global) يظهر دائمًا
     const _w = window.activeWorldContext?.();
@@ -122,6 +128,7 @@ async function renderMembersList(q, containerId = "dmsMembersList") {
     });
 
   } catch(e) {
+    if (generation !== _membersRenderGeneration) return;
     el.innerHTML = `<div class="dm-empty">خطأ في التحميل</div>`;
     console.error(e);
   }

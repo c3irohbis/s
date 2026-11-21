@@ -16,21 +16,27 @@ let _mentionStart    = -1; // موضع @ في الـ input
 let _activeIndex     = -1;
 
 // ── جلب قائمة المستخدمين مع cache ──
+let _mentionContext = null;
 async function _fetchUsers() {
+  const uid = window.currentUser?.uid || null;
+  const world = window.activeWorldContext?.() || null;
+  const context = JSON.stringify([uid,world]);
+  if (_mentionContext !== context) {
+    _mentionContext = context; _mentionUsers = []; _mentionCacheAt = 0;
+  }
   const now = Date.now();
-  if (_mentionUsers.length && now - _mentionCacheAt < MENTION_CACHE_TTL) return _mentionUsers;
+  if (_mentionCacheAt && now - _mentionCacheAt < MENTION_CACHE_TTL) return _mentionUsers;
   try {
-    // أعضاء عالمي + المالك فقط (window._getWorldUsers من index.html) — الاحتياط: الاستعلام القديم
-    const src = window._getWorldUsers
-      ? await window._getWorldUsers()
-      : (await getDocs(query(collection(window.db, "users"), orderBy("name"), limit(200)))).docs.map(d => ({ uid: d.id, ...d.data() }));
+    if (!uid || !window._getWorldUsers) return [];
+    const src = await window._getWorldUsers();
+    if (window.currentUser?.uid !== uid || (window.activeWorldContext?.() || null) !== world) return [];
     _mentionUsers = src
       .map(d => ({ uid: d.uid || d.id, name: d.name || "", photo: d.photo || "", publicId: d.publicId || "", gender: d.gender || "" }))
-      .filter(u => u.uid !== window.currentUser?.uid)
+      .filter(u => u.uid !== uid)
       .sort((a, b) => a.name.localeCompare(b.name));
     _mentionCacheAt = now;
-  } catch(e) {}
-  return _mentionUsers;
+    return _mentionUsers;
+  } catch(e) { if (_mentionContext === context) { _mentionUsers = []; _mentionCacheAt = 0; } return []; }
 }
 
 // ── تصفية المستخدمين بالبحث ──
