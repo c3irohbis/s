@@ -310,8 +310,13 @@ async function handleInstructionsContent(request, env, user, cards) {
     if (cached) {
       const etag = cached.headers.get("ETag");
       if (inm && etag && inm.split(",").map(s => s.trim()).includes(etag))
-        return new Response(null, { status: 304, headers: { ...corsHeaders(request, env), "ETag": etag, "Cache-Control": "max-age=" + INSTR.CACHE_TTL_S } });
-      return new Response(cached.body, { status: 200, headers: { ...cached.headers, ...corsHeaders(request, env) } });
+        return new Response(null, { status: 304, headers: { ...corsHeaders(request, env), "ETag": etag, "Cache-Control": "max-age=" + INSTR.CACHE_TTL_S, "X-Cache": "HIT" } });
+      // Headers لا تُفرد بالـspread ({...cached.headers} = {})؛ تُنسخ بـnew Headers وإلا ضاعت ETag/Cache-Control عن إصابات الكاش
+      const h = new Headers(cached.headers);
+      const co = corsHeaders(request, env);
+      for (const k in co) h.set(k, co[k]);
+      h.set("X-Cache", "HIT");
+      return new Response(cached.body, { status: 200, headers: h });
     }
   } catch (_) { /* الكاش أفضل جهد */ }
 
@@ -335,7 +340,7 @@ async function handleInstructionsContent(request, env, user, cards) {
 
   const headers = {
     "Content-Type": "application/json", "X-Content-Type-Options": "nosniff",
-    "Cache-Control": "max-age=" + INSTR.CACHE_TTL_S, "ETag": etag,
+    "Cache-Control": "max-age=" + INSTR.CACHE_TTL_S, "ETag": etag, "X-Cache": "MISS",
     ...corsHeaders(request, env),
   };
   if (inm && inm.split(",").map(s => s.trim()).includes(etag))
