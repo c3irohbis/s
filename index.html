@@ -2390,10 +2390,6 @@ window.setActiveWorld = function(worldId) {
   if (typeof window.isValidWorldId !== "function" || !window.isValidWorldId(worldId)) return;
   window._activeWorld = worldId;
   sessionStorage.setItem("activeWorld", worldId);
-  if (id !== "page-chat") {
-    window._stopChatListener?.();
-    window._cleanupPollListeners?.();
-  } else queueMicrotask(() => window._resumeVisibleChat?.());
   window._forumLiveSync?.();   // تبديل العالم: أعد ربط قوائم المنتدى الظاهرة بالعالم الجديد (أو افصلها)
   // معاينة الشات العام وقائمة الغرف مرتبطتان بالعالم النشط وقت البدء — أعد ربطهما بالعالم الجديد
   window._dmsStopListeners?.();
@@ -2503,6 +2499,10 @@ window.showPage = (id) => {
   if (_prevPageId && _prevPageId !== id) {
     window._navPush?.(`page:${id}`, () => window.showPage(_prevPageId));
   }
+  if (id !== "page-chat") {
+    window._stopChatListener?.();
+    window._cleanupPollListeners?.();
+  } else queueMicrotask(() => window._resumeVisibleChat?.());
   window._forumLiveSync?.();   // قوائم المنتدى: اربط/افصل المستمع حسب ظهور القسم
 };
 
