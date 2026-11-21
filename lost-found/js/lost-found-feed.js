@@ -21,122 +21,109 @@
   window.__LF = window.__LF || {};
   const core = window.__LF.core;
 
-  let _unsubFeed = null;
-  let _generation = 0;
-  function stop() {
-    ++_generation;
-    if (_unsubFeed) { try { _unsubFeed(); } catch (e) {} _unsubFeed = null; }
-  }
+  const PAGE_SIZE = 30;
+  let _generation = 0, _ctx = null, _containerEl = null;
+  let _allDocs = [], _browseDocs = [], _searchDocs = null, _searchTerm = "";
+  let _cursor = null, _more = true, _loading = false, _searchPending = null, _searchOffline = false;
+  let _countObserver = null;
+  const _countCache = new Map();
+  function stop() { ++_generation; _ctx = null; _countObserver?.disconnect(); _countObserver=null; }
   core.registerUnsubscribe(stop);
+  const current = ctx => !!ctx && ctx === _ctx && ctx.generation === _generation && ctx.uid === window.currentUser?.uid && ctx.world === (window.activeWorldContext?.() || null);
 
-  let _allDocs = [];      // آخر نسخة من المنشورات المنشورة (للفلترة المحلية عند البحث)
-  let _searchTerm = "";
-  let _containerEl = null;
-
-  /* ─────────────────────────────────────────
-     الدخول من core.switchView("feed")
-  ───────────────────────────────────────── */
   function render(container) {
-    _containerEl = container;
-    _containerEl.innerHTML = `<div class="lf-loading"><i class="fa-solid fa-spinner fa-spin"></i></div>`;
-    startListener();
+    stop(); _containerEl=container; _browseDocs=[]; _allDocs=[]; _searchDocs=null;
+    _cursor=null; _more=true; _loading=false; _searchPending=null; _searchOffline=false; _countCache.clear();
+    _ctx={generation:_generation,uid:window.currentUser?.uid,world:window.activeWorldContext?.() || null,local:new Map()};
+    if (_searchTerm) loadSearch(_ctx); else loadNext(_ctx);
   }
 
-  async function startListener() {
-    // يمنع تكرار الاشتراك لو render() اتنادت تاني من غير إغلاق كامل (مثلاً ضغط التاب أكتر من مرة)
-    if (_unsubFeed) { try { _unsubFeed(); } catch (e) {} _unsubFeed = null; }
-
-    const generation = ++_generation;
-    let fs;
+  async function loadNext(ctx) {
+    if (!current(ctx) || _loading || !_more) return;
+    _loading=true; renderList();
     try {
-      fs = await core.getFS();
-    } catch (e) {
-      if (generation !== _generation) return;
-      renderError("تعذر الاتصال بقاعدة البيانات");
-      return;
-    }
-    if (generation !== _generation || document.hidden) return;
-    const { db, collection, query, where, orderBy, onSnapshot } = fs;
-
-    // ⚠️ عمدًا من غير limit(): البحث المحلي في renderList() بيفترض إن _allDocs = كل
-    // المنشورات المنشورة فعلًا، مش صفحة أولى بس. لو اتضاف limit()/pagination مستقبلًا،
-    // لازم البحث يتحول لـ query على السيرفر (where على title/description) بدل الفلترة المحلية،
-    // وإلا هيوهم المستخدم إن النتائج شاملة وهي مش كده.
-    const q = query(
-      collection(db, "lostFound"),
-      where("status", "==", "published"),
-      orderBy("createdAt", "desc")
-    );
-
-    _unsubFeed = onSnapshot(
-      q,
-      (snap) => {
-        _allDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        renderList();
-      },
-      (err) => {
-        console.error("[LostFound:feed]", err);
-        renderError("حدث خطأ أثناء تحميل المنشورات");
-      }
-    );
-
-
+      const {db,collection,query,where,orderBy,startAfter,limit,getDocs}=await core.getFS();
+      if (!current(ctx)) return;
+      const clauses=[where("status","==","published"),orderBy("createdAt","desc")];
+      if (_cursor) clauses.push(startAfter(_cursor));
+      const snap=await getDocs(query(collection(db,"lostFound"),...clauses,limit(PAGE_SIZE)));
+      if (!current(ctx)) return;
+      const merged=new Map(_browseDocs.map(p=>[p.id,p]));
+      snap.docs.forEach(d=>{if(!ctx.local.has(d.id))merged.set(d.id,{...d.data(),id:d.id});});
+      ctx.local.forEach((p,id)=>{if(p)merged.set(id,p);else merged.delete(id);});
+      _browseDocs=[...merged.values()];
+      if(snap.docs.length)_cursor=snap.docs[snap.docs.length-1];
+      _more=!!snap.metadata?.fromCache || snap.docs.length===PAGE_SIZE;
+    } catch(e) {if(current(ctx))window.toast?.("تعذر تحميل المنشورات، حاول مرة أخرى","error");}
+    finally {if(current(ctx)){_loading=false;renderList();}}
   }
 
-  /* ─────────────────────────────────────────
-     البحث (بينادى من core.js عند الكتابة في lf-search)
-  ───────────────────────────────────────── */
+  async function loadSearch(ctx) {
+    if (!current(ctx)) return;
+    if (_searchDocs) {renderList();return;}
+    if (_searchPending) return _searchPending;
+    const pending=Promise.resolve().then(async()=>{
+      renderList();
+      try {
+        const {db,collection,query,where,orderBy,getDocs}=await core.getFS();
+        if (!current(ctx)) return;
+        const snap=await getDocs(query(collection(db,"lostFound"),where("status","==","published"),orderBy("createdAt","desc")));
+        if (!current(ctx)) return;
+        const merged=new Map(snap.docs.map(d=>[d.id,{...d.data(),id:d.id}]));ctx.local.forEach((p,id)=>{if(p)merged.set(id,p);else merged.delete(id);});
+        _searchDocs=[...merged.values()];_searchOffline=!!snap.metadata?.fromCache;
+      }catch(e){if(current(ctx))window.toast?.("تعذر البحث الشامل، اضغط تحديث للمحاولة","error");}
+      finally{if(current(ctx)){_searchPending=null;renderList();}}
+    });
+    _searchPending=pending;return pending;
+  }
+
   function onSearchInput(term) {
-    _searchTerm = (term || "").trim().toLowerCase();
-    renderList();
+    _searchTerm=(term || "").trim().toLowerCase();
+    if(_searchTerm)loadSearch(_ctx);else renderList();
   }
 
   function renderList() {
-    if (!_containerEl) return;
-
-    const docs = _searchTerm
-      ? _allDocs.filter(
-          (p) =>
-            (p.title || "").toLowerCase().includes(_searchTerm) ||
-            (p.description || "").toLowerCase().includes(_searchTerm)
-        )
-      : _allDocs;
-
-    if (docs.length === 0) {
-      _containerEl.innerHTML = `
-        <div class="lf-empty">
-          <i class="fa-solid fa-box-open"></i>
-          <p>${_searchTerm ? "مفيش نتائج مطابقة" : "لسه مفيش منشورات"}</p>
-        </div>`;
-      return;
-    }
-
-    _containerEl.innerHTML = `<div class="lf-feed-list">${docs.map(renderPostCard).join("")}</div>`;
-    wireCardEvents();
-    loadCommentCounts(docs);
+    if (!_containerEl || !current(_ctx)) return;
+    _countObserver?.disconnect();_countObserver=null;
+    _allDocs=_searchTerm ? (_searchDocs || []) : _browseDocs;
+    const docs=_searchTerm ? _allDocs.filter(p=>(p.title || "").toLowerCase().includes(_searchTerm)||(p.description || "").toLowerCase().includes(_searchTerm)) : _allDocs;
+    const waiting=!!_searchTerm && !_searchDocs;
+    _containerEl.innerHTML=`<div class="lf-found-toolbar"><span>${_searchTerm ? (_searchOffline?"نتائج محفوظة قد تكون غير مكتملة":"البحث يشمل كل المنشورات المنشورة") : "منشورات الصفحات المحملة، حسب آخر تحديث"}</span><button type="button" class="lf-found-refresh">تحديث</button></div>` +
+      (waiting ? `<div class="lf-empty">${_searchPending?"جارٍ البحث الشامل...":"اضغط تحديث لإعادة البحث الشامل"}</div>` : docs.length ? `<div class="lf-feed-list">${docs.map(renderPostCard).join("")}</div>` : `<div class="lf-empty"><i class="fa-solid fa-box-open"></i><p>${_searchTerm?"مفيش نتائج مطابقة":_more?"اضغط تحميل المزيد للتحقق من المنشورات":"لسه مفيش منشورات"}</p></div>`) +
+      (!_searchTerm && _more ? `<button type="button" class="lf-found-more" ${_loading?"disabled":""}>${_loading?"جارٍ التحميل...":"تحميل المزيد من المنشورات"}</button>` : "");
+    _containerEl.querySelector(".lf-found-refresh")?.addEventListener("click",()=>render(_containerEl));
+    _containerEl.querySelector(".lf-found-more")?.addEventListener("click",()=>loadNext(_ctx));
+    wireCardEvents(); loadCommentCounts(docs);
   }
 
-  // عدد التعليقات الحقيقي — نفس تقنية getCountFromServer() المستخدمة في إحصائيات found.js،
-  // بدل حقل commentsCount مخزّن كان محتاج حماية Rules معقّدة (تعارض تم حله بإلغاء العداد نفسه)
   async function loadCommentCounts(docs) {
-    let fs;
-    try {
-      fs = await core.getFS();
-    } catch (e) {
-      return; // فشل تحميل الأعداد لا يمنع عرض الفيد نفسه
-    }
-    const { db, collection, getCountFromServer } = fs;
-
-    docs.forEach(async (post) => {
-      try {
-        const snap = await getCountFromServer(collection(db, "lostFound", post.id, "comments"));
-        const el = _containerEl && _containerEl.querySelector(`.lf-comments-count[data-post-id="${post.id}"]`);
-        if (el) el.textContent = `${snap.data().count} تعليق`;
-      } catch (e) {
-        // فشل عد تعليقات منشور واحد لا يوقف باقي الأعداد
-      }
-    });
+    const ctx=_ctx;
+    const load=async post=>{
+      if(!current(ctx))return;
+      let pending=_countCache.get(post.id);
+      if(!pending){pending=(async()=>{const {db,collection,getCountFromServer}=await core.getFS();return(await getCountFromServer(collection(db,"lostFound",post.id,"comments"))).data().count;})();_countCache.set(post.id,pending);}
+      try{const count=await pending;if(!current(ctx))return;const el=_containerEl.querySelector(`.lf-comments-count[data-post-id="${post.id}"]`);if(el)el.textContent=`${count} تعليق`;}
+      catch(e){if(_countCache.get(post.id)===pending)_countCache.delete(post.id);}
+    };
+    if(typeof IntersectionObserver!=="function"){docs.slice(0,30).forEach(load);return;}
+    const byId=new Map(docs.map(p=>[p.id,p]));
+    _countObserver=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){_countObserver?.unobserve(e.target);const post=byId.get(e.target.dataset.postId);if(post)load(post);}}),{root:core.state.root?.querySelector(".lf-content") || null});
+    _containerEl.querySelectorAll(".lf-post-card").forEach(el=>_countObserver.observe(el));
   }
+
+  function removeLocal(id,actorUid=window.currentUser?.uid) {
+    if(!current(_ctx)||actorUid!==_ctx.uid)return;
+    _ctx.local.set(id,null);
+    _browseDocs=_browseDocs.filter(p=>p.id!==id);if(_searchDocs)_searchDocs=_searchDocs.filter(p=>p.id!==id);_countCache.delete(id);renderList();
+  }
+  function upsertLocal(post,actorUid=window.currentUser?.uid) {
+    if(!current(_ctx)||actorUid!==_ctx.uid)return;
+    if(post.status!=="published"){removeLocal(post.id,actorUid);return;}
+    _ctx.local.set(post.id,post);
+    const update=list=>[post,...list.filter(p=>p.id!==post.id)];
+    _browseDocs=update(_browseDocs);if(_searchDocs)_searchDocs=update(_searchDocs);renderList();
+  }
+  function invalidateCount(id) {_countCache.delete(id);if(current(_ctx))renderList();}
 
   function renderPostCard(post) {
     const typeLabel = post.type === "lost" ? "مفقود" : "موجود";
@@ -259,5 +246,5 @@
       </div>`;
   }
 
-  window.__LF.feed = { stop, render, onSearchInput };
+  window.__LF.feed = { stop, render, onSearchInput, removeLocal, upsertLocal, invalidateCount };
 })();

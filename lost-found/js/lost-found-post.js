@@ -291,6 +291,8 @@
           rejectionReason: null,
           adminNote: null,
         });
+        window.__LF.feed?.removeLocal?.(_editingPostId,currentUser.uid);
+        window.__LF.admin?.upsertLocal?.({...existing,...basePayload,id:_editingPostId,status:"pending",adminNote:null,rejectionReason:null},currentUser.uid);
         window.toast?.("تم إعادة إرسال الطلب للمراجعة ✓");
       } else {
         const payload = {
@@ -312,7 +314,9 @@
           resolvedBy: null,
           resolvedAt: null,
         };
-        await addDoc(collection(db, "lostFound"), payload);
+        const added=await addDoc(collection(db, "lostFound"), payload);
+        window.__LF.feed?.upsertLocal?.({...payload,id:added.id,createdAt:new Date()},currentUser.uid);
+        window.__LF.admin?.upsertLocal?.({...payload,id:added.id,createdAt:new Date()},currentUser.uid);
         window.toast?.(_directPublish ? "تم النشر ✓" : "تم إرسال طلبك للمراجعة ✓");
       }
 
@@ -397,6 +401,8 @@
 
       await deleteDoc(postRef);
       window.__LF.found?.removeLocal?.(postId);
+      window.__LF.feed?.removeLocal?.(postId,currentUser?.uid);
+      window.__LF.admin?.removeLocal?.(postId,currentUser?.uid);
       window.toast?.("تم حذف المنشور ✓");
       core.closeModal();
     } catch (e) {

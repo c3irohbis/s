@@ -218,6 +218,7 @@
         resolvedAt: serverTimestamp(),
       });
 
+      window.__LF.feed?.removeLocal?.(postId,currentUser.uid);
       window.toast?.("تم تسجيلها كـ (لقيتها) ✓");
       core.closeModal(); // كانت مفتوحة من تفاصيل المنشور في feed.js
     } catch (e) {

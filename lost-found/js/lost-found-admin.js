@@ -23,88 +23,39 @@
   window.__LF = window.__LF || {};
   const core = window.__LF.core;
 
-  let _unsubQueue = null;
-  let _generation = 0;
-  function stop() {
-    ++_generation;
-    if (_unsubQueue) { try { _unsubQueue(); } catch (e) {} _unsubQueue = null; }
-  }
+  const PAGE_SIZE=30;
+  let _generation=0,_container=null,_docs=[],_cursor=null,_more=true,_loading=false,_mode="pending",_ctx=null;
+  function stop(){++_generation;_container=null;_ctx=null;}
   core.registerUnsubscribe(stop);
-
-
-  /* ─────────────────────────────────────────
-     الدخول من core.switchView("admin")
-  ───────────────────────────────────────── */
-  function render(container) {
-    container.innerHTML = `
-      <div class="lf-admin-toolbar">
-        <button type="button" class="lf-direct-publish-btn">
-          <i class="fa-solid fa-bullhorn"></i> نشر مباشر
-        </button>
-      </div>
-      <div class="lf-admin-queue"><div class="lf-loading"><i class="fa-solid fa-spinner fa-spin"></i></div></div>
-    `;
-
-    container.querySelector(".lf-direct-publish-btn")?.addEventListener("click", () => {
-      if (window.__LF.post) window.__LF.post.openCreateForm({ directPublish: true });
-    });
-
-    startListener(container);
+  const current=ctx=>!!ctx&&ctx===_ctx&&ctx.generation===_generation&&ctx.uid===window.currentUser?.uid&&ctx.world===(window.activeWorldContext?.()||null);
+  function render(container,mode="pending"){
+    stop();_container=container;_mode=mode==="rejected"?"rejected":"pending";_docs=[];_cursor=null;_more=true;_loading=false;
+    _ctx={generation:_generation,uid:window.currentUser?.uid,world:window.activeWorldContext?.()||null,local:new Map()};
+    container.innerHTML=`<div class="lf-admin-toolbar"><button type="button" class="lf-direct-publish-btn">نشر مباشر</button><button type="button" class="lf-admin-refresh lf-found-refresh">تحديث</button></div><div class="lf-tabs"><button type="button" class="lf-tab ${_mode==="pending"?"active":""}" data-queue="pending">قيد المراجعة</button><button type="button" class="lf-tab ${_mode==="rejected"?"active":""}" data-queue="rejected">المرفوضات</button></div><div class="lf-found-toolbar">الطلبات حسب آخر تحديث، تحميل 30 في كل صفحة</div><div class="lf-admin-queue"></div>`;
+    container.querySelector(".lf-direct-publish-btn")?.addEventListener("click",()=>window.__LF.post?.openCreateForm({directPublish:true}));
+    container.querySelector(".lf-admin-refresh")?.addEventListener("click",()=>render(container,_mode));
+    container.querySelectorAll("[data-queue]").forEach(btn=>btn.addEventListener("click",()=>render(container,btn.dataset.queue)));
+    loadNext(_ctx);
   }
-
-  async function startListener(container) {
-    if (_unsubQueue) { try { _unsubQueue(); } catch (e) {} _unsubQueue = null; }
-
-    const listEl = container.querySelector(".lf-admin-queue");
-
-    const generation = ++_generation;
-    let fs;
-    try {
-      fs = await core.getFS();
-    } catch (e) {
-      if (generation !== _generation) return;
-      renderError(listEl, "تعذر الاتصال بقاعدة البيانات");
-      return;
-    }
-    if (generation !== _generation || document.hidden) return;
-    const { db, collection, query, where, orderBy, onSnapshot } = fs;
-
-    const q = query(
-      collection(db, "lostFound"),
-      where("status", "in", ["pending", "rejected"]),
-      orderBy("createdAt", "desc")
-    );
-
-    _unsubQueue = onSnapshot(
-      q,
-      (snap) => {
-        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        renderQueue(listEl, docs);
-      },
-      (err) => {
-        console.error("[LostFound:admin]", err);
-        renderError(listEl, "حدث خطأ أثناء تحميل الطلبات");
-      }
-    );
-
-
+  async function loadNext(ctx){
+    if(!current(ctx)||_loading||!_more)return;_loading=true;renderQueue(_container.querySelector(".lf-admin-queue"),_docs);
+    try{
+      const {db,collection,query,where,orderBy,startAfter,limit,getDocs}=await core.getFS();if(!current(ctx))return;
+      const clauses=[where("status","==",_mode),orderBy("createdAt","desc")];if(_cursor)clauses.push(startAfter(_cursor));
+      const snap=await getDocs(query(collection(db,"lostFound"),...clauses,limit(PAGE_SIZE)));if(!current(ctx))return;
+      const merged=new Map(_docs.map(p=>[p.id,p]));snap.docs.forEach(d=>{if(!ctx.local.has(d.id))merged.set(d.id,{...d.data(),id:d.id});});ctx.local.forEach((p,id)=>{if(p)merged.set(id,p);else merged.delete(id);});_docs=[...merged.values()];
+      if(snap.docs.length)_cursor=snap.docs[snap.docs.length-1];_more=!!snap.metadata?.fromCache||snap.docs.length===PAGE_SIZE;
+    }catch(e){if(current(ctx))window.toast?.("تعذر تحميل الطلبات، حاول مرة أخرى","error");}
+    finally{if(current(ctx)){_loading=false;renderQueue(_container.querySelector(".lf-admin-queue"),_docs);}}
   }
-
-  function renderQueue(listEl, docs) {
-    if (!listEl) return;
-
-    if (docs.length === 0) {
-      listEl.innerHTML = `
-        <div class="lf-empty">
-          <i class="fa-solid fa-inbox"></i>
-          <p>مفيش طلبات محتاجة مراجعة دلوقتي</p>
-        </div>`;
-      return;
-    }
-
-    listEl.innerHTML = docs.map(renderRequestCard).join("");
-    wireQueueEvents(listEl);
+  function renderQueue(listEl,docs){
+    if(!listEl)return;
+    listEl.innerHTML=docs.length?docs.map(renderRequestCard).join(""):`<div class="lf-empty"><i class="fa-solid fa-inbox"></i><p>${_more?"اضغط تحميل المزيد للتحقق من الطلبات":_mode==="pending"?"مفيش طلبات محتاجة مراجعة دلوقتي":"لا توجد طلبات مرفوضة"}</p></div>`;
+    if(_more)listEl.innerHTML+=`<button type="button" class="lf-admin-more lf-found-more" ${_loading?"disabled":""}>${_loading?"جارٍ التحميل...":"تحميل المزيد من الطلبات"}</button>`;
+    listEl.querySelector(".lf-admin-more")?.addEventListener("click",()=>loadNext(_ctx));wireQueueEvents(listEl);
   }
+  function removeLocal(id,actorUid=window.currentUser?.uid){if(!current(_ctx)||actorUid!==_ctx.uid)return;_ctx.local.set(id,null);_docs=_docs.filter(p=>p.id!==id);renderQueue(_container.querySelector(".lf-admin-queue"),_docs);}
+  function upsertLocal(post,actorUid=window.currentUser?.uid){if(!current(_ctx)||actorUid!==_ctx.uid)return;if(post.status!==_mode){removeLocal(post.id,actorUid);return;}_ctx.local.set(post.id,post);_docs=[post,..._docs.filter(p=>p.id!==post.id)];renderQueue(_container.querySelector(".lf-admin-queue"),_docs);}
 
   function renderRequestCard(post) {
     const typeLabel = post.type === "lost" ? "مفقود" : "موجود";
@@ -213,15 +164,18 @@
      الكتابات — كل دالة بتتحقق isAdmin() بنفسها أولًا (دفاع إضافي)
   ───────────────────────────────────────── */
   async function approve(postId) {
+    const actorUid=window.currentUser?.uid, localPost=_docs.find(p=>p.id===postId);
     if (!core.state.isAdmin) { window.toast?.("غير مسموح", "warn"); return; }
     try {
       const fs = await core.getFS();
       const { db, doc, updateDoc, serverTimestamp } = fs;
+      if (!actorUid || actorUid !== window.currentUser?.uid) return;
       await updateDoc(doc(db, "lostFound", postId), {
         status: "published",
-        approvedBy: window.currentUser.uid,
+        approvedBy: actorUid,
         approvedAt: serverTimestamp(),
       });
+      removeLocal(postId,actorUid);
       window.toast?.("تم النشر ✓");
     } catch (e) {
       console.error("[LostFound:admin] فشل approve", e);
@@ -230,16 +184,19 @@
   }
 
   async function reject(postId, reason) {
+    const actorUid=window.currentUser?.uid, localPost=_docs.find(p=>p.id===postId);
     if (!core.state.isAdmin) { window.toast?.("غير مسموح", "warn"); return; }
     try {
       const fs = await core.getFS();
       const { db, doc, updateDoc, serverTimestamp } = fs;
+      if (!actorUid || actorUid !== window.currentUser?.uid) return;
       await updateDoc(doc(db, "lostFound", postId), {
         status: "rejected",
-        rejectedBy: window.currentUser.uid,
+        rejectedBy: actorUid,
         rejectedAt: serverTimestamp(),
         rejectionReason: reason,
       });
+      if(localPost)upsertLocal({...localPost,status:"rejected",rejectionReason:reason},actorUid);else removeLocal(postId,actorUid);
       window.toast?.("تم رفض الطلب");
     } catch (e) {
       console.error("[LostFound:admin] فشل reject", e);
@@ -248,12 +205,15 @@
   }
 
   async function requestEdit(postId, note) {
+    const actorUid=window.currentUser?.uid, localPost=_docs.find(p=>p.id===postId);
     if (!core.state.isAdmin) { window.toast?.("غير مسموح", "warn"); return; }
     try {
       const fs = await core.getFS();
       const { db, doc, updateDoc } = fs;
       // الحالة تفضل pending — بس بملاحظة توضح للطالب المطلوب تعديله في "طلباتك السابقة"
+      if (!actorUid || actorUid !== window.currentUser?.uid) return;
       await updateDoc(doc(db, "lostFound", postId), { adminNote: note });
+      if(localPost)upsertLocal({...localPost,adminNote:note},actorUid);
       window.toast?.("تم إرسال الملاحظة ✓");
     } catch (e) {
       console.error("[LostFound:admin] فشل requestEdit", e);
@@ -270,5 +230,5 @@
       </div>`;
   }
 
-  window.__LF.admin = { stop, render };
+  window.__LF.admin = { stop, render, removeLocal, upsertLocal };
 })();

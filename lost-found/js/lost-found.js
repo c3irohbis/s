@@ -37,7 +37,7 @@
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = src + "?v=thread-pages-2";
+      s.src = src + "?v=feed-pages-3";
       s.onload = resolve;
       s.onerror = () => reject(new Error("فشل تحميل: " + src));
       document.body.appendChild(s);

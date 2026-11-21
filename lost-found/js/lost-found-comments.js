@@ -234,6 +234,7 @@
         createdAt: serverTimestamp(),
       };
       const added = await addDoc(collection(db,"lostFound",postId,"comments"),payload);
+      window.__LF.feed?.invalidateCount?.(postId);
       const state = _state;
       if (state && current(state) && state.postId === postId && state.uid === currentUser.uid) {
         const local = {...payload,id:added.id,createdAt:new Date()};
@@ -259,6 +260,7 @@
 
       if (!uid || uid !== window.currentUser?.uid) return;
       await deleteDoc(doc(db, "lostFound", postId, "comments", commentId));
+      window.__LF.feed?.invalidateCount?.(postId);
       const state = _state;
       if (state && current(state) && state.postId === postId && state.uid === uid) {
         const hasReplies = [...state.docs.values()].some(c=>c.parentId===commentId);
