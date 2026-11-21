@@ -25,7 +25,7 @@ import { getSchedule } from "./schedule-repository.js?v=1";
 
 import {
   collection, doc, getDoc, getDocs,
-  writeBatch, setDoc, query, where, documentId
+  writeBatch, setDoc, query, where, documentId, getCountFromServer
 } from "./firestore-safe.js";
 
 function _db() { return window.db; }
@@ -302,44 +302,58 @@ window.__attSaveSubjects = async () => {
 let _attRecordsCache = {}; // { "2026-08-06": {status, subjects,...} }
 let _attCalMonth = null;   // {year, month} — 1-based month
 
+let _attHistoryGeneration = 0;
+let _attMonthGeneration = 0;
+function _attMonthBounds(year, month) {
+  const start = `${year}-${String(month).padStart(2,"0")}-01`;
+  const end = `${month === 12 ? year+1 : year}-${String(month === 12 ? 1 : month+1).padStart(2,"0")}-01`;
+  return {start,end};
+}
+async function _loadAttMonth() {
+  const uid = window.currentUser?.uid, generation = ++_attMonthGeneration;
+  if (!uid || !_attCalMonth) return;
+  const {year,month} = _attCalMonth;
+  const current = () => uid === window.currentUser?.uid && generation === _attMonthGeneration && _attCalMonth?.year === year && _attCalMonth?.month === month;
+  const grid = _el("attCalGrid");
+  if (grid) grid.innerHTML = `<div class="spinner"></div>`;
+  try {
+    const {start,end} = _attMonthBounds(year,month);
+    const snap = await getDocs(query(collection(_db(), "users", uid, "attendance"), where(documentId(), ">=", start), where(documentId(), "<", end)));
+    if (!current()) return;
+    _attRecordsCache = {};
+    snap.forEach(d => { _attRecordsCache[d.id] = d.data(); });
+    _renderAttCalendar();
+  } catch(e) {
+    if (current() && grid) grid.innerHTML = `<div class="empty-state">تعذّر تحميل الشهر، حاول مرة أخرى</div>`;
+  }
+}
 export async function loadAttendanceHistory() {
-  const uid = window.currentUser?.uid;
+  const uid = window.currentUser?.uid, generation = ++_attHistoryGeneration;
   const statsEl = _el("attHistStats");
   if (!uid || !statsEl) return;
   statsEl.innerHTML = `<div class="spinner"></div>`;
+  const { dateStr } = _cairoNow();
+  const [year,month] = dateStr.split("-").map(Number);
+  _attCalMonth = {year,month}; _attRecordsCache = {};
+  const monthLoad = _loadAttMonth();
   try {
-    const snap = await getDocs(collection(_db(), "users", uid, "attendance"));
-    _attRecordsCache = {};
-    snap.forEach(d => { _attRecordsCache[d.id] = d.data(); });
-
-    const all = Object.values(_attRecordsCache);
-    const presentDays = all.filter(r => r.status === "present" || r.status === "partial").length;
-    const absentDays  = all.filter(r => r.status === "absent").length;
-    const totalDays   = all.length;
+    const ref = collection(_db(), "users", uid, "attendance");
+    const [present, absent, total] = await Promise.all([
+      getCountFromServer(query(ref, where("status", "in", ["present","partial"]))),
+      getCountFromServer(query(ref, where("status", "==", "absent"))),
+      getCountFromServer(ref)
+    ]);
+    if (uid !== window.currentUser?.uid || generation !== _attHistoryGeneration) return;
+    const presentDays = present.data().count, absentDays = absent.data().count, totalDays = total.data().count;
     const pct = totalDays ? Math.round((presentDays / totalDays) * 100) : 0;
-
     statsEl.innerHTML = `
-      <div class="att-stat-card">
-        <div class="att-stat-num good">${presentDays}</div>
-        <div class="att-stat-label">أيام حضور</div>
-      </div>
-      <div class="att-stat-card">
-        <div class="att-stat-num bad">${absentDays}</div>
-        <div class="att-stat-label">أيام غياب</div>
-      </div>
-      <div class="att-stat-card">
-        <div class="att-stat-num">${pct}%</div>
-        <div class="att-stat-label">نسبة الحضور</div>
-      </div>`;
-
-    const { dateStr } = _cairoNow();
-    const [y, m] = dateStr.split("-").map(Number);
-    _attCalMonth = { year: y, month: m };
-    _renderAttCalendar();
-  } catch (e) {
-    statsEl.innerHTML = `<div class="empty-state">خطأ في التحميل</div>`;
-    console.error(e);
+      <div class="att-stat-card"><div class="att-stat-num good">${presentDays}</div><div class="att-stat-label">أيام حضور</div></div>
+      <div class="att-stat-card"><div class="att-stat-num bad">${absentDays}</div><div class="att-stat-label">أيام غياب</div></div>
+      <div class="att-stat-card"><div class="att-stat-num">${pct}%</div><div class="att-stat-label">نسبة الحضور</div></div>`;
+  } catch(e) {
+    if (uid === window.currentUser?.uid && generation === _attHistoryGeneration) statsEl.innerHTML = `<div class="empty-state">تعذّر تحميل الإجماليات</div>`;
   }
+  await monthLoad;
 }
 
 function _statusColor(status) {
@@ -380,12 +394,12 @@ function _renderAttCalendar() {
 window.__attCalPrevMonth = () => {
   if (!_attCalMonth) return;
   _attCalMonth.month--; if (_attCalMonth.month < 1) { _attCalMonth.month = 12; _attCalMonth.year--; }
-  _renderAttCalendar();
+  _loadAttMonth();
 };
 window.__attCalNextMonth = () => {
   if (!_attCalMonth) return;
   _attCalMonth.month++; if (_attCalMonth.month > 12) { _attCalMonth.month = 1; _attCalMonth.year++; }
-  _renderAttCalendar();
+  _loadAttMonth();
 };
 window.__attShowDayDetail = (ds) => {
   const wrap = _el("attDayDetail");
