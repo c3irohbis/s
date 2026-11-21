@@ -49,6 +49,8 @@
   const GW_URL      = "https://bliss-gateway.cairohbis.workers.dev";
   const GW_CFG_TTL  = 60e3;   // الإعداد يُخزَّن في sessionStorage بحد أقصى 60 ثانية
   const GW_RECHECK  = 10e3;   // حد أدنى بين إعادات التحقق التلقائية (يُستثنى ما بعد الحفظ)
+  const GW_TIMEOUT  = 5e3;    // مهلة طلبات البوابة (تشمل جلب التوكن؛ 5 ثوانٍ رأفة بالشبكات البطيئة — ملاحظة المالك أ)
+  const GW_DOWN_TTL = 60e3;   // قاطع الدائرة: بعد فشل البوابة يتخطّاها الكارت دقيقة واحدة (ملاحظة المالك ج)
   let _gwAbort    = null;     // AbortController للطلب الحالي
   let _gwInflight = null;     // وعد واحد في الطيران لكل كارت
   let _gwEtag     = null;
@@ -63,16 +65,19 @@
       const c = JSON.parse(sessionStorage.getItem("gwCfg") || "null");
       if (c && c.cards && Date.now() - c.at < GW_CFG_TTL) return c.cards;
     } catch (_) {}
+    const ac = new AbortController();
+    const to = setTimeout(() => ac.abort(), GW_TIMEOUT);
     try {
-      const r = await fetch(GW_URL + "/v1/config", { headers: { Authorization: "Bearer " + (await _gwToken()) } });
-      if (!r.ok) return null;
+      const r = await fetch(GW_URL + "/v1/config", { signal: ac.signal, headers: { Authorization: "Bearer " + (await _gwToken()) } });
+      if (!r.ok) { _gwTrip(); return null; }
       const j = await r.json();
       if (j && j.v === 1 && j.data && j.data.cards) {
         try { sessionStorage.setItem("gwCfg", JSON.stringify({ at: Date.now(), cards: j.data.cards })); } catch (_) {}
         return j.data.cards;
       }
-    } catch (_) {}
-    return null; // أي فشل ← firebase
+    } catch (_) { _gwTrip(); }
+    finally { clearTimeout(to); }
+    return null; // أي فشل أو مهلة ← firebase
   }
 
   // 2.8: لا يُعتمد ردّ البوابة إلا بغلاف سليم كامل، وإلا تُرفض البيانات
@@ -95,16 +100,23 @@
     else if (_view === "read") { if (_docs[_curKey]) _renderRead(); else _goList(); }
   }
 
-  function _gwToFirebase() { _gwMode = "firebase"; if (_gwIsOpen()) _fsStart(); }
+  function _gwTrip() { try { sessionStorage.setItem("gwDown", String(Date.now())); } catch (_) {} }
+  function _gwDown() { try { const t = +sessionStorage.getItem("gwDown") || 0; return t > 0 && Date.now() - t < GW_DOWN_TTL; } catch (_) { return false; } }
+  function _gwUp()   { try { sessionStorage.removeItem("gwDown"); } catch (_) {} }
+
+  function _gwToFirebase() { _gwTrip(); _gwMode = "firebase"; if (_gwIsOpen()) _fsStart(); }
 
   async function _gwFetch(force) {
     if (_gwInflight) return _gwInflight;
+    if (_gwDown()) return; // القاطع مفتوح: لا طلبات حتى انتهاء الدقيقة
     if (!force && Date.now() - _gwLastFetch < GW_RECHECK) return;
     _gwLastFetch = Date.now();
     if (_gwAbort) _gwAbort.abort();
     const ac = _gwAbort = new AbortController();
     _gwInflight = (async () => {
       for (let attempt = 0; attempt < 3; attempt++) { // إعادتان كحد أقصى، على 5xx/الشبكة فقط
+        let timedOut = false;
+        const to = setTimeout(() => { timedOut = true; ac.abort(); }, GW_TIMEOUT);
         try {
           // If-None-Match فقط إذا كانت النسخة المحلية موجودة فعلًا (close() يفرّغ _docs؛ وإلا أظهر 304 قائمة فارغة خطأً)
           const hasLocal = Object.keys(_docs).length > 0;
@@ -112,21 +124,26 @@
             signal: ac.signal,
             headers: { Authorization: "Bearer " + (await _gwToken()), ...(_gwEtag && hasLocal ? { "If-None-Match": _gwEtag } : {}) },
           });
-          if (r.status === 304) { _gwRenderFromDocs(); return; }
+          if (r.status === 304) { _gwUp(); _gwRenderFromDocs(); return; }
           if (r.status === 503 || (r.status >= 400 && r.status < 500)) { _gwToFirebase(); return; } // disabled أو 4xx: فورًا وبلا إعادة
           if (!r.ok) throw new Error("gw-" + r.status);
           const j = await r.json();
           if (!_gwValidPayload(j)) { _gwToFirebase(); return; }
+          _gwUp();
           _gwEtag = r.headers.get("ETag") || j.etag || _gwEtag;
           _docs = {};
           j.data.forEach(d => { _docs[d.featureKey] = { id: d.featureKey, ...d }; });
           _gwRenderFromDocs();
           return;
         } catch (e) {
-          if (e && e.name === "AbortError") return; // إلغاء عمدي (إغلاق الكارت أو إعادة فتحه)
+          clearTimeout(to); // أول سطر في الـcatch (إصلاح مراجعة المالك): إيقاف مؤقّت المحاولة قبل أي انتظار حتى لا يُجهَض المتحكّم أثناء الـbackoff
+          if (e && e.name === "AbortError") {
+            if (timedOut) { _gwToFirebase(); return; } // بوابة معلّقة: رجوع فوري بلا إعادة
+            return; // إلغاء عمدي (إغلاق الكارت أو إعادة فتحه)
+          }
           if (attempt >= 2) { _gwToFirebase(); return; }
           await new Promise(res => setTimeout(res, 1000 * (attempt + 1))); // تباعد متصاعد
-        }
+        } finally { clearTimeout(to); }
       }
     })();
     try { await _gwInflight; } finally { _gwInflight = null; }
@@ -269,6 +286,7 @@
 
   async function _startListener() {
     if (_unsub) return;
+    if (_gwDown()) { _gwMode = "firebase"; _fsStart(); return; } // قاطع الدائرة مفتوح: بلا حتى طلب إعداد
     const cards = await _gwConfig(); // null أو غياب المفتاح ← firebase
     if (!_gwIsOpen()) return;      // أُغلق الكارت أثناء جلب الإعداد: لا مستمع
     const mode = (cards && cards.instructions) || "firebase";
