@@ -23,10 +23,9 @@
   let _isRestoring  = false;
   let _backPending  = false; // true بين استدعاء history.back() ووصول popstate الخاص بها فعليًا
 
-  // نقطة أساس لسجل المتصفح إن لم تكن موجودة (أول تحميل للموقع)
-  if (!history.state || typeof history.state.navDepth !== "number") {
-    history.replaceState({ navDepth: 0 }, "");
-  }
+  // كل تحميل يبدأ بسجل ذاكرة فارغ، فلا نحتفظ بعمق من تحميل سابق.
+  // نغيّر العمق فقط ونحفظ أي بيانات أخرى في حالة سجل المتصفح.
+  history.replaceState({ ...history.state, navDepth: 0 }, "");
 
   /* تسجيل خطوة "فتح" جديدة — تُستدعى من نقاط الربط داخل دوال الفتح.
      إن كانت هناك history.back() معلّقة (إغلاق سريع جدًا تبعه فتح فوري)، نؤجّل
@@ -49,6 +48,7 @@
     if (_isRestoring) return false;
     const top = _navStack[_navStack.length - 1];
     if (top && top.tag === tag) {
+      if (_backPending) return true; // ضغطة أخرى لنفس الإغلاق تنتظر popstate ولا ترجع خطوة إضافية
       _backPending = true;
       history.back();
       return true;
