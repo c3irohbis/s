@@ -18,6 +18,7 @@ try { if ((document.referrer || "").indexOf("android-app://") === 0) sessionStor
 let _overlay = null, _mini = null, _done = null;
 let _open = false, _installing = false, _awaiting = false, _busy = false, _doneTimer = null;
 let _sizeTxt = "";
+let _readyToOffer = false;
 
 /* ── Browser مقابل App (نفس فحص pwa-install.js + referrer التطبيق) ── */
 function _isApp() {
@@ -77,6 +78,7 @@ function _build() {
 function _show() {
   _build();
   _hideMini();
+  _overlay.querySelector(".apk-btn").textContent = window.getPWAInstallState?.() === "available" ? "تثبيت التطبيق" : "إرشادات التثبيت";
   const sz = _overlay.querySelector(".apk-size");
   sz.textContent = _sizeTxt;
   sz.style.display = _sizeTxt ? "" : "none";
@@ -101,14 +103,22 @@ function _onBack() {
   if (!_installing) _showMini();
 }
 
-function _download() {
+async function _download() {
+  if (_installing) return;
   _installing = true;
   _awaiting = true;
   _open = false;
   _overlay.classList.remove("show");
   _hideMini();
   if (window._navGoBackIfMatches) window._navGoBackIfMatches(TAG);
-  try { window.installPWAFromCard && window.installPWAFromCard(); } catch (_) {}
+  let result;
+  try { result = await window.installPWAFromCard?.(); }
+  catch (_) { result = { outcome: "error" }; }
+  if (result?.outcome !== "accepted" && result?.outcome !== "installing") {
+    _awaiting = false;
+    _installing = false;
+    if (!_isApp() && window.currentUser) _showMini();
+  }
 }
 
 function _showMini() {
@@ -149,6 +159,8 @@ window.addEventListener("appinstalled", () => {
 /* ── إخفاء كل شيء (تسجيل الخروج / إيقاف الميزة) ── */
 window.__apkPromptHide = function () {
   _scheduled = false;
+  _readyToOffer = false;
+  _awaiting = false;
   _open = false; _installing = true;
   if (_overlay) _overlay.classList.remove("show");
   _hideMini();
@@ -171,6 +183,21 @@ function _whenActive(fn) {
   evs.forEach((t) => window.addEventListener(t, go, { capture: true, passive: true }));
 }
 
+function _offerWhenReady() {
+  if (!_readyToOffer || window.getPWAInstallState?.() !== "available") return;
+  _whenActive(() => {
+    if (_readyToOffer && window.currentUser && !_open && !_isApp() && window.getPWAInstallState?.() === "available") _show();
+  });
+}
+window.addEventListener("pwa-install-statechange", () => {
+  if (_isApp()) {
+    _readyToOffer = false;
+    _open = false;
+    if (_overlay) _overlay.classList.remove("show");
+    _hideMini();
+  } else _offerWhenReady();
+});
+
 let _scheduled = false;
 window.__apkPromptAfterLogin = function () {
   if (_scheduled || _isApp()) return;
@@ -182,7 +209,8 @@ window.__apkPromptAfterLogin = function () {
       if (_isApp() || !window.currentUser || !window.db) return;
       if (!(await _enabled())) return;
       _sizeTxt = await _appSizeText();
-      if (window.currentUser) _whenActive(() => { if (window.currentUser && !_open) _show(); });
+      _readyToOffer = !!window.currentUser;
+      _offerWhenReady();
     } finally { _busy = false; }
   }, 1500);
 };

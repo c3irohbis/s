@@ -13,14 +13,20 @@
   "lang": "ar",
   "icons": [
     {
-      "src": "images/app-icon.png",
-      "sizes": "591x591",
+      "src": "images/app-icon-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "images/app-icon-maskable.png",
-      "sizes": "640x640",
+      "src": "images/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "images/app-icon-maskable.png?v=pwa-install-1",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
     }
