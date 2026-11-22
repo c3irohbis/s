@@ -6,7 +6,7 @@
 <title>نظام الجامعة — RBAC</title>
 
 <!-- ══ PWA — فتح الموقع كتطبيق مستقل بلا شريط عنوان (بعد "إضافة إلى الشاشة الرئيسية") ══ -->
-<link rel="manifest" href="manifest.json?v=pwa-install-1">
+<link rel="manifest" href="manifest.json">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -28,7 +28,7 @@ if ("serviceWorker" in navigator) {
 }
 </script>
 
-<script src="js/pwa-install.js?v=pwa-install-1"></script>
+<script src="js/pwa-install.js"></script>
 
 <!-- ── Import Map (وسيط مركزي) ──────────────────────────────────
      أي ملف في الصفحة (بما فيها الملفات المستقلة زي poll.js، library.js،
@@ -123,11 +123,7 @@ if ("serviceWorker" in navigator) {
      LOGIN PAGE — واجهة الدخول وإنشاء الحساب (الجديدة)
      المنطق: js/auth-ui.js | الأنماط: css/auth-ui.css | الربط مع Firebase: js/auth-bridge.js
 ══════════════════════════════════════════ -->
-<div id="page-login" class="page" style="flex-direction:column">
-  <aside data-pwa-install-entry style="position:relative;z-index:2;width:100%;max-width:360px;margin:0 auto 12px;text-align:center">
-    <button type="button" class="av-secondary" data-pwa-install-action style="width:100%;justify-content:center">خيارات تثبيت التطبيق</button>
-    <div data-pwa-install-status role="status" aria-live="polite" style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6">يمكنك تثبيت التطبيق بدون تسجيل الدخول</div>
-  </aside>
+<div id="page-login" class="page">
   <div class="lp-scene" id="lpScene">
 
     <!-- ══ المصباح ══ -->
@@ -364,10 +360,6 @@ if ("serviceWorker" in navigator) {
       <button class="icon-btn" id="adminBtn" onclick="showPage('page-admin')"><i class="fa-solid fa-gear"></i> أدمن</button>
       <div id="themeToggleSlot"></div>
     </div>
-  </div>
-
-  <div data-pwa-install-entry style="padding:0 16px 12px;text-align:center">
-    <button type="button" class="av-secondary" data-pwa-install-action style="width:auto;max-width:100%;margin:auto">خيارات تثبيت التطبيق</button>
   </div>
 
   <!-- HOME TAB -->
@@ -6802,7 +6794,7 @@ try { window._listenPinnedMsg?.(); } catch(e) {}
 <script type="module" src="js/appearance-page.js"></script>
 <script type="module" src="js/quick-notifications.js"></script>
 <script type="module" src="js/disclaimer-consent.js"></script>
-<script type="module" src="js/apk-prompt.js?v=pwa-install-1"></script>
+<script type="module" src="js/apk-prompt.js"></script>
 <script type="module" src="js/update-notice.js"></script>
 <script src="js/why-here-forum.js"></script>
 <script type="module" src="js/forum-badges.js?v=count-order-6"></script>
