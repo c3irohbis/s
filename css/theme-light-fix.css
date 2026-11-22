@@ -274,13 +274,6 @@ html.theme-light .np-item-act-btn.read-btn{color:var(--text)}
 html.theme-light .np-item-act-btn.del-btn{color:var(--text)}
 html.theme-light textarea.inp::placeholder{color:var(--text) !important}
 html.theme-light input.inp::placeholder{color:var(--text) !important}
-html.theme-light .analytics-period-tab.active{color:var(--text)}
-html.theme-light .analytics-chart-title i{color:var(--text)}
-html.theme-light .analytics-top-rank.first{color:var(--text)}
-html.theme-light .analytics-top-rank.second{color:var(--text)}
-html.theme-light .analytics-top-rank.third{color:var(--text)}
-html.theme-light .analytics-top-val{color:var(--text)}
-html.theme-light .analytics-sec-sub-title i{color:var(--text)}
 html.theme-light .smod-title i{color:var(--text)}
 html.theme-light .smod-tab.active{color:var(--text)}
 html.theme-light .smod-theme-btn.active .smod-theme-btn-label{color:var(--text)}
@@ -370,9 +363,6 @@ html.theme-light .lib-subject-count{color:var(--text)}
 html.theme-light .lib-item-desc{color:var(--text)}
 html.theme-light .lib-item-date{color:var(--text)}
 html.theme-light .lib-detail-count{color:var(--text)}
-html.theme-light .analytics-stat-label{color:var(--text)}
-html.theme-light .analytics-stat-card.accent-gold .analytics-stat-num{color:var(--text)}
-html.theme-light .analytics-stat-card.accent-teal .analytics-stat-num{color:var(--text)}
 html.theme-light .tab.active{color:var(--text)}
 html.theme-light .msg-sender-name{color:var(--text)}
 html.theme-light .inp::placeholder{color:var(--text) !important}
