@@ -285,6 +285,23 @@
     var F = await fs();
     var ref = F.doc(window.db, "activeCalls", target.peerUid);
     callCtx = { ref: ref, peerUid: target.peerUid, role: "caller", title: title, opts: opts || null };
+    /* مكالمة سابقة بتسيب المستند بحالة ended/declined، والقواعد بتمنع setDoc
+       فوق مستند موجود (بيتحسب update) — فبنمسح القديم أولًا بشرط الحالة
+       النهائية فقط، أبدًا ringing/accepted. القراءة+المسح جوه معاملة واحدة:
+       لو المستند اتغيّر في النص المعاملة بتتعاد تلقائيًا ثم تتوقف، فمستحيل
+       نمسح رنين جديد أو مكالمة شغالة. */
+    try {
+      await F.runTransaction(window.db, async function (tx) {
+        var prev = await tx.get(ref);
+        if (!prev.exists()) return;
+        var st = (prev.data() || {}).state;
+        if (st === "ended" || st === "declined") { tx.delete(ref); return; }
+        throw new Error("peer-busy");
+      });
+    } catch (e) {
+      if (e && e.message === "peer-busy") { toast("الطرف الآخر مشغول حاليًا"); await end(false); return; }
+      /* خطأ قراءة/مسح عابر: نكمّل — setDoc هيفشل طبيعي لو لسه فيه مانع */
+    }
     await F.setDoc(ref, { callerUid: callUid, callerName: myName(), calleeUid: target.peerUid, state: "ringing", ts: F.serverTimestamp() });
     sigUnsub = F.onSnapshot(ref, onSignal, function () {});
     ringTimer = setTimeout(function () { finishSignal("لا يوجد رد", true); }, 45000);
