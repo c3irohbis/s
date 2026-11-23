@@ -1,6 +1,7 @@
 import { collection, query, where, onSnapshot, doc, getDoc, getDocs, getCountFromServer } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 /* ── عدّاد غير المقروء: بدون مستمعات — يُحسب بعدّ من السيرفر عند وصول رسالة جديدة من الطرف الآخر فقط ── */
+const _escHtml = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let _dmsUnreadMap = {};  // roomId → عدد غير المقروء
 let _dmsCountedAt = {};  // roomId → lastMessageAt (ms) عند آخر عدّ
 let _dmsCountSeq  = {};  // roomId → رقم آخر طلب عدّ (لتجاهل الردود المتأخرة)
@@ -95,8 +96,8 @@ function _av(photo, name, cls) {
   if (cls==="public") return `<div class="dms-conv-avatar dms-conv-avatar-public"><i class="fa-solid fa-graduation-cap"></i></div>`;
   if (cls==="room")   return `<div class="dms-conv-avatar dms-conv-avatar-room"><i class="fa-solid fa-users"></i></div>`;
   if (cls==="ai")     return `<div class="dms-conv-avatar ai-avatar"><i class="fa-solid fa-sparkles"></i></div>`;
-  if (photo) return `<img class="dms-conv-avatar" src="${photo}" alt="">`;
-  return `<div class="dms-conv-avatar dms-conv-avatar-letter">${(name||"?").charAt(0).toUpperCase()}</div>`;
+  if (photo) return `<img class="dms-conv-avatar" src="${_escHtml(photo)}" alt="">`;
+  return `<div class="dms-conv-avatar dms-conv-avatar-letter">${_escHtml((name||"?").charAt(0).toUpperCase())}</div>`;
 }
 
 /* ── بناء عنصر ── */
@@ -126,12 +127,12 @@ function _buildItem(item) {
       </div>
       <div class="dms-conv-body">
         <div class="dms-conv-row1">
-          <span dir="auto"><span class="dms-conv-name">${item.name||"مستخدم"}${item.cls==="ai" ? ' <span class="ai-badge">AI</span>' : ""}</span>${nameBadgesHTML}</span>
+          <span dir="auto"><span class="dms-conv-name">${_escHtml(item.name||"مستخدم")}${item.cls==="ai" ? ' <span class="ai-badge">AI</span>' : ""}</span>${nameBadgesHTML}</span>
           ${extrasHTML}
           <span class="dms-conv-time">${_fmt(item.lastTime)}</span>
         </div>
         <div class="dms-conv-row2">
-          <span class="dms-conv-last">${item.lastMsg||"ابدأ المحادثة"}</span>
+          <span class="dms-conv-last">${_escHtml(item.lastMsg||"ابدأ المحادثة")}</span>
           <span class="dms-conv-badges">${badge}</span>
         </div>
       </div>
