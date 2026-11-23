@@ -62,3 +62,7 @@
 #page-ai-chat .bariq-topic-title{font-weight:600}
 #page-ai-chat .bariq-section p{font-weight:400}
 #page-ai-chat .bubble-text{font-weight:400}
+/* Same surface tokens as dmex-mute-options in dm-extras.js. */
+#page-ai-chat .msg-row.other .bubble,#page-ai-chat .bariq-options{background:rgba(20,20,22,0.10);backdrop-filter:blur(8px) saturate(140%);-webkit-backdrop-filter:blur(8px) saturate(140%);border:1px solid rgba(255,255,255,.06);border-radius:14px}
+#page-ai-chat .bariq-options{padding:3px 8px}
+#page-ai-chat button.bariq-chip{font-family:'Cairo',system-ui,sans-serif;color:var(--text,#f2f2f4)}
