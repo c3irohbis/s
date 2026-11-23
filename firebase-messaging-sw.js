@@ -68,7 +68,7 @@ self.addEventListener('notificationclick', function(event) {
    رقم CACHE_VERSION عشان المستخدمين ياخدوا النسخة الجديدة.
    ══════════════════════════════════════════ */
 
-const CACHE_VERSION = 'v25'; // المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
+const CACHE_VERSION = 'v26'; // split phase 4: js/app/*.js modules; المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
 const CACHE_NAME = 'bariq-shell-' + CACHE_VERSION;
 const MEDIA_CACHE_NAME = 'bariq-media-' + CACHE_VERSION;
 
@@ -96,7 +96,7 @@ const PRECACHE_PATHS = [
   'js/back-nav.js', 'js/bubble-blur.js', 'js/bubble-color.js', 'js/change-password.js',
   'js/chat-backgrounds.js', 'js/chat-search.js', 'js/connectivity.js', 'js/dm-extras.js',
   'js/dms-page.js', 'js/draft-messages.js', 'js/emoji-picker.js', 'js/auth-ui.js', 'js/auth-bridge.js',
-  'js/library.js', 'js/lightbox.js', 'js/maintenance.js', 'js/newchat-ui.js', 'js/app-main.js', 'js/mention.js', 'js/military.js',
+  'js/library.js', 'js/lightbox.js', 'js/maintenance.js', 'js/newchat-ui.js', 'js/app-main.js', 'js/app/a-init-config.js', 'js/app/b-fcm-notif.js', 'js/app/c-upload-audit-stub.js', 'js/app/d-state-roles-email.js', 'js/app/e-toast-confirm.js', 'js/app/f-nav-chatpage.js', 'js/app/g-auth-profile-logout.js', 'js/app/h-avatars.js', 'js/app/i-authstate.js', 'js/app/j-dm-open.js', 'js/app/k-usercache-publicid.js', 'js/app/l-requests-chat-helpers-ban.js', 'js/app/m-chat-send-ui.js', 'js/app/n-admin-ban-unban.js', 'js/app/o-profile-save.js', 'js/app/p-content-loaders-forum.js', 'js/app/q-add-content.js', 'js/app/r-owner-admin-panels.js', 'js/app/s-badges-display.js', 'js/app/t-self-listener.js', 'js/app/u-rooms.js', 'js/app/v-profile-cards-picctx.js', 'js/app/w-visit-system.js', 'js/app/y-reply-fwd.js', 'js/app/z-tail-hooks.js', 'js/mention.js', 'js/military.js',
   'js/notif-panel.js', 'js/notif-settings.js', 'js/pin-message.js', 'js/poll.js',
   'js/report.js', 'js/settings-modal.js', 'js/skeleton-loader.js',
   'js/splash.js', 'js/theme-toggle.js', 'js/upload-engine.js',
