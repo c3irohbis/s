@@ -70,6 +70,15 @@
   let _draftSheet = null;    // {id?, page, dueDate, note, image, _file}
   let _busy = false;
 
+  let _bariqSheetSnapshot = null;
+  // Memory-only read view for Bariq. Never loads a subject or completion record.
+  window.BariqLoadedSheets = function () {
+    const uid=_uid(), world=_worldId();
+    if (!_loaded || !uid || _loadedUid!==uid || !_subjects.length || _subjects.some(s=>s.worldId!==world)) return null;
+    const snap=_bariqSheetSnapshot;
+    if (!snap || snap.uid!==uid || snap.world!==world) return null;
+    return {world,at:snap.at,partial:true,subject:snap.subject,rows:snap.rows.map(x=>({...x}))};
+  };
   function _root() { return document.getElementById("sheetaty-app-root"); }
   function _body() { return document.getElementById("shtBody"); }
 
@@ -165,6 +174,7 @@
   window.SheetatyModule._openSubject = async function (subjectId) {
     const generation = ++_subjectGeneration, uid = _uid(), world = _worldId();
     const current = () => generation === _subjectGeneration && uid === _uid() && world === _worldId() && _currentSubjectId === subjectId;
+    _bariqSheetSnapshot = null;
     _currentSubjectId = subjectId; _view = "subject";
     const subj = _subjects.find(s=>s.id===subjectId);
     _setTitle(subj ? subj.name : "المادة");
@@ -188,6 +198,10 @@
         snap.forEach(d=>{_completions[d.id]=d.data();});
       });
       _sheets = sheets;
+      _bariqSheetSnapshot = {uid,world,at:Date.now(),subject:subj.name,rows:sheets.map(s=>({
+        subject:subj.name,page:String(s.page||''),due:String(s.dueDate||''),note:String(s.note||''),
+        done:_knownCompletionIds.has(s.id)?!!_completions[s.id]?.completed:null
+      }))};
       _renderSubject();
     } catch(e) {
       if (current() && body) body.innerHTML = `<div class="sht-empty"><div class="sht-empty-title">تعذّر تحميل شيتات المادة</div></div>`;
@@ -558,6 +572,7 @@
     const root = _root();
     const wasOpen = !!(root && root.classList.contains("sht-open"));
     if (wasOpen) window.SheetatyModule.close();
+    _bariqSheetSnapshot = null;
     _loaded = false; _loadedUid = null;
     _subjects = []; _sheets = []; _completions = {}; _completionsUid = null;
     _view = "home"; _tab = "active";
