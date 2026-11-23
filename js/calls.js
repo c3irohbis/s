@@ -18,7 +18,7 @@
   var lkRoom = null, active = false, starting = false, timerId = null, t0 = 0, audioEls = {}, videoEls = {}, callUid = null, camOn = false;
   /* إشارات الرنين عبر مستند activeCalls/{calleeUid} — الاسم جوّاه (صفر قراءات إضافية)،
      مستمع واحد لكل مستخدم، والمدة تتحسب محليًا من لحظة الاتصال عند كل طرف */
-  var fsP = null, callCtx = null, sigUnsub = null, ringTimer = null, inboxUnsub = null, inboxUid = null, incomingData = null;
+  var fsP = null, callCtx = null, sigUnsub = null, ringTimer = null, inboxUnsub = null, inboxUid = null, inboxErrAt = 0, inboxErrStreak = 0, incomingData = null;
   function fs() { if (!fsP) fsP = import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js"); return fsP; }
   function myName() { var me = window.currentUser; return ((window._currentUserData && window._currentUserData.name) || (me && me.displayName) || "مستخدم"); }
   function fmtDur(ms) { var s = Math.max(0, Math.floor(ms / 1000)); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); }
@@ -204,14 +204,22 @@
     if (uid === inboxUid) return;
     if (inboxUnsub) { try { inboxUnsub(); } catch (e) {} inboxUnsub = null; }
     if (!uid || !window.db) return; /* db مش جاهز لسه: نحاول تاني مع التيك الجاي */
+    if (inboxErrStreak && Date.now() - inboxErrAt < Math.min(60000, 2000 * inboxErrStreak)) return; /* تراجع تصاعدي بعد خطأ البث: حماية للكوتا من إعادة اشتراك فاشلة كل 800ms */
     inboxUid = uid;
     var F = await fs();
     if (inboxUid !== uid || !curUid()) return;
-    inboxUnsub = F.onSnapshot(F.doc(window.db, "activeCalls", uid), onIncoming, function () {});
+    inboxUnsub = F.onSnapshot(F.doc(window.db, "activeCalls", uid), onIncoming, function (err) {
+      // شفاء ذاتي: لو بث المراقبة مات بخطأ، نسجّل الرمز ونصفّر الحالة عشان تيك refreshBtn (800ms) يعيد الاشتراك تلقائيًا
+      try { console.warn("inbox listener error:", err && (err.code || err.message || err)); } catch (e) {}
+      inboxErrStreak++; inboxErrAt = Date.now();
+      if (inboxUnsub) { try { inboxUnsub(); } catch (e) {} inboxUnsub = null; }
+      if (inboxUid === uid) inboxUid = null;
+    });
   }
 
   function onIncoming(snap) {
     try {
+      inboxErrStreak = 0; /* بث سليم ⇒ تصفير التراجع */
       if (!snap.exists()) { hideIncoming(); return; }
       var d = snap.data() || {};
       if (d.state === "ringing") {
