@@ -11,7 +11,7 @@ import "./app/i-authstate.js";
 import "./app/j-dm-open.js";
 import "./app/k-usercache-publicid.js";
 import "./app/l-requests-chat-helpers-ban.js";
-import "./app/m-chat-send-ui.js?v=profanity-1";
+import "./app/m-chat-send-ui.js?v=profanity-2";
 import "./app/n-admin-ban-unban.js";
 import "./app/o-profile-save.js";
 import "./app/p-content-loaders-forum.js";
