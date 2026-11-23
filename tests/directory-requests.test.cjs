@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');const fs=require('node:fs');const path=require('node:path');
-const html=fs.readFileSync(path.join(__dirname,'../js/app-main.js'),'utf8');const a=html.indexOf('let _worldUsersCache ='),b=html.indexOf('window._getWorldUsers = _getWorldUsers;',a);
+const html=require('./_app-source.cjs').source;const a=html.indexOf('let _worldUsersCache ='),b=html.indexOf('window._getWorldUsers = _getWorldUsers;',a);
 const code=html.slice(a,b);
 test('world directory shares concurrent work and never broadens errors into global scans',async()=>{
  let world='a',reads=0,resolve;const ctx={window:{currentUser:{uid:'me'},activeWorldContext:()=>world},db:{},OWNER_UID:'owner',CACHE_TTL_MS:300000,_userCache:{},collection:()=>({}),query:(...q)=>q,where:(...q)=>q,doc:()=>({}),getDoc:async()=>({exists:()=>false}),getDocs:()=>{reads++;return new Promise(r=>resolve=r)}};
