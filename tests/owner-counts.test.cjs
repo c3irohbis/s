@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const html=fs.readFileSync(path.join(__dirname,'../js/app-main.js'),'utf8');const indexHtml=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+const html=require('./_app-source.cjs').source;const indexHtml=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
 test('owner counts preserve aggregates and in-flight sharing after analytics removal',async()=>{
  const start=html.indexOf('let _ownerStatsPending');const end=html.indexOf('let _allOwnerUsers');
  assert.ok(end>start,'slice end marker found');
