@@ -59,7 +59,7 @@ async function sb(env, method, path, body, prefer) {
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   if (r.status === 404) return null;
-  if (!r.ok) throw Error('supabase-' + r.status);
+  if (!r.ok) { let d; try { d=await r.json(); } catch {} const e=Error('supabase-' + r.status); e.dbCode = /^[A-Z0-9]{5,12}$/.test(d?.code || '') ? d.code : null; throw e; }
   const t = await r.text();
   return t ? JSON.parse(t) : null;
 }
@@ -217,7 +217,7 @@ export default {
     if (req.headers.get('Origin') !== ORIGIN) return response(req, 403, {error:'origin-not-allowed'});
     if (req.method === 'OPTIONS') return response(req, 204, null); /* الـ preflight لا يعتمد على الإعداد */
     if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return response(req, 503, {error:'not-configured'});
-    try { return await handle(req, env); } catch { return response(req, 502, {error:'upstream-failed'}); }
+    try { return await handle(req, env); } catch (e) { return response(req, 502, {error:'upstream-failed', upstream_status: /^supabase-[0-9]{3}$/.test(e.message || '') ? Number(e.message.slice(9)) : null, db_code: e.dbCode || null}); }
   },
   async scheduled(event, env) {
     if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return;
