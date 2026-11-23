@@ -92,6 +92,7 @@ export async function initFCM(uid, { app, db, getCurrentChatId } = {}) {
   if (!fcmSupported()) return; // silently skip unsupported browsers
   _fcmDb = db;
   _getCurrentChatIdRef = getCurrentChatId || null;
+  window.__fcmPermFlowBusy = true;
   try {
     const _swBase = (function () {
       const p = location.pathname;
@@ -153,6 +154,7 @@ export async function initFCM(uid, { app, db, getCurrentChatId } = {}) {
     window.location.href =
       `intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;S.android.provider.extra.APP_PACKAGE=${ANDROID_PACKAGE};end`;
   } catch (e) { /* silently ignore unsupported or SW-missing environments */ }
+  finally { window.__fcmPermFlowBusy = false; }
 }
 
 // ── لما المستخدم يرجع للتطبيق (بعد ما يفتح إعدادات أندرويد مثلاً) نتأكد
