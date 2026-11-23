@@ -42,7 +42,11 @@
   Object.entries(tabs).forEach(([id,tab])=>{actions[id]=()=>{
     if(typeof window.openSettingsModal!=='function') throw Error('unavailable');
     window.openSettingsModal(); window.switchSettingsTab?.(tab);
-    if(id==='password') requestAnimationFrame(()=>document.getElementById('currentPassword')?.scrollIntoView({block:'center',behavior:'smooth'}));
+    if(id==='password'||id==='account') {
+      const panel=document.getElementById('sec-account');
+      if(panel&&!panel.classList.contains('open')) window.toggleProfSection?.('sec-account');
+      if(id==='password') requestAnimationFrame(()=>document.getElementById('currentPassword')?.scrollIntoView({block:'center',behavior:'smooth'}));
+    }
   };});
   actions.profile=()=>home('tab-profile');
   actions.photo=()=>{home('tab-profile');window.openPhotoUploadDirect?.();};
