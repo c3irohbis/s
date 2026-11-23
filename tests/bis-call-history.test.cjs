@@ -20,7 +20,7 @@ function makeToken(sub) {
 /* ── محاكي PostgREST لجدول call_records في الذاكرة ── */
 let table;
 function matchCond(row, key, val) {
-  const m = /^(.+)\.(eq|lt|gt)\.(.+)$/.exec(key ? '' : '') || null;
+  const m = /^(.+)\.(eq|lt|gt|gte|lte)\.(.+)$/.exec(key ? '' : '') || null;
   return true;
 }
 function applyFilters(rows, params) {
@@ -29,11 +29,11 @@ function applyFilters(rows, params) {
     if (k === 'or') {
       const inner = v.replace(/^\(|\)$/g, '').split(',');
       out = out.filter(r => inner.some(cond => {
-        const m = /^(.+)\.(eq|lt|gt)\.(.+)$/.exec(cond);
+        const m = /^(.+)\.(eq|lt|gt|gte|lte)\.(.+)$/.exec(cond);
         return m && cmp(r[m[1]], m[2], m[3]);
       }));
     } else if (k !== 'order' && k !== 'limit' && k !== 'select') {
-      const m = /^(eq|lt|gt)\.(.+)$/.exec(v);
+      const m = /^(eq|lt|gt|gte|lte)\.(.+)$/.exec(v);
       if (m) out = out.filter(r => cmp(r[k], m[1], m[2]));
     }
   }
@@ -43,7 +43,7 @@ function cmp(actual, op, expected) {
   if (op === 'eq') return String(actual) === expected;
   const a = Date.parse(actual), b = Date.parse(expected);
   if (isNaN(a) || isNaN(b)) return false;
-  return op === 'lt' ? a < b : a > b;
+  return op === 'lt' ? a < b : op === 'lte' ? a <= b : op === 'gte' ? a >= b : a > b;
 }
 function applyOrder(rows, order) {
   if (!order) return rows;
@@ -213,4 +213,18 @@ test('bad tokens and bad input rejected', async () => {
   assert.equal(r.status, 403, 'foreign origin');
   r = await worker.fetch(req('GET', '/v1/calls/since?ts=garbage', A), env);
   assert.equal(r.status, 400, 'bad timestamp');
+});
+
+test('legacy incoming resolver is recipient-scoped, time-bounded and refuses ambiguity', async () => {
+  table = [];
+  const id=callId();
+  await worker.fetch(req('POST','/v1/calls/ring',A,{callId:id,chatId:chatAB,calleeUid:B,callType:'audio'}),env);
+  const at=encodeURIComponent(new Date().toISOString());
+  const route='/v1/calls/incoming?callerUid='+A+'&signalAt='+at;
+  let r=await worker.fetch(req('GET',route,B),env);
+  assert.equal(r.status,200);assert.equal((await r.json()).record.id,id);
+  r=await worker.fetch(req('GET',route,C),env);assert.equal(r.status,409,'not recipient cannot resolve');
+  r=await worker.fetch(req('GET','/v1/calls/incoming?callerUid='+A+'&signalAt=2000-01-01',B),env);assert.equal(r.status,400,'stale signal refused');
+  await worker.fetch(req('POST','/v1/calls/ring',A,{callId:callId(),chatId:chatAB,calleeUid:B,callType:'audio'}),env);
+  r=await worker.fetch(req('GET',route,B),env);assert.equal(r.status,409);assert.equal((await r.json()).error,'ambiguous-signal');
 });
