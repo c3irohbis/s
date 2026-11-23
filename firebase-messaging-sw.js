@@ -68,7 +68,7 @@ self.addEventListener('notificationclick', function(event) {
    رقم CACHE_VERSION عشان المستخدمين ياخدوا النسخة الجديدة.
    ══════════════════════════════════════════ */
 
-const CACHE_VERSION = 'v36'; // بطاقة 10: ترقيم صفحات مستمع المحاضرات // بطاقتا فحص 6+7: طابور النوافذ (apk-prompt/notif-permission) + إصلاح فيضان فقاعات الشات (style.css/chat-reply.css) // بطاقة فحص 5: تراجع عن توحيد مفتاح الكاش (كان بيكسر importmap scopes ويوقف الإقلاع) + الاحتفاظ بالـprecache الكامل // بطاقة فحص 4: أيقونة الإشعارات كانت /favicon.ico (غير موجودة ومسار مطلق يكسر تحت مجلد Pages) // بطاقة فحص 3: توسيع الـprecache لكل ملفات الشيل + مطابقة الطلبات متجاهلة ?v= // fix users-manager refresh (window.loadOwnerUsers/Stats); split phase 4: js/app/*.js modules; المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
+const CACHE_VERSION = 'v37'; // بطاقة 10: ترقيم صفحات مستمع المحاضرات // بطاقتا فحص 6+7: طابور النوافذ (apk-prompt/notif-permission) + إصلاح فيضان فقاعات الشات (style.css/chat-reply.css) // بطاقة فحص 5: تراجع عن توحيد مفتاح الكاش (كان بيكسر importmap scopes ويوقف الإقلاع) + الاحتفاظ بالـprecache الكامل // بطاقة فحص 4: أيقونة الإشعارات كانت /favicon.ico (غير موجودة ومسار مطلق يكسر تحت مجلد Pages) // بطاقة فحص 3: توسيع الـprecache لكل ملفات الشيل + مطابقة الطلبات متجاهلة ?v= // fix users-manager refresh (window.loadOwnerUsers/Stats); split phase 4: js/app/*.js modules; المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
 const CACHE_NAME = 'bariq-shell-' + CACHE_VERSION;
 const MEDIA_CACHE_NAME = 'bariq-media-' + CACHE_VERSION;
 
@@ -117,6 +117,7 @@ const PRECACHE_PATHS = [
   'css/site-design.css', 'css/study-schedule.css', 'css/theme-light-fix.css', 'css/tuition-fees.css',
   'css/update-notice.css', 'css/why-here-forum.css', 'js/account-archive.js', 'js/apk-prompt.js',
   'js/appearance-page.js', 'js/attendance.js', 'js/bubble-gradient-scroll.js', 'js/calls.js',
+  'js/call-history.js',
   'js/card-gateway.js', 'js/chat-core.js', 'js/chat-ctxmenu.js', 'js/chat-listener.js',
   'js/chat-newdesign-camera.js', 'js/chat-newdesign-wiring.js', 'js/chat-presence-text.js', 'js/chat-reactions.js',
   'js/chat-reply.js', 'js/chat-select.js', 'js/chat-send.js', 'js/disclaimer-consent.js',
