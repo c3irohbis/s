@@ -74,6 +74,26 @@ function _build() {
   document.body.appendChild(_overlay);
 }
 
+/* ── طابور النوافذ: نافذة تحميل التطبيق متفتحش قبل ما المستخدم يقرر في
+   نافذة تأكيد النظام (زي إذن الإشعارات) — كانت بتظهر فوقها (z-index أعلى)
+   وضغطة مكان زر الإلغاء كانت بتبدأ التحميل. نستنى لما النافذة تتقفل ── */
+function _sysModalOpen() {
+  try {
+    const b = document.getElementById("modalBackdrop");
+    if (b && b.classList.contains("show")) return true;
+  } catch (_) {}
+  return window.__fcmPermFlowBusy === true;
+}
+function _showWhenClear() {
+  if (!_sysModalOpen()) { _show(); return; }
+  let tries = 0;
+  const t = setInterval(() => {
+    tries++;
+    if (!_sysModalOpen()) { clearInterval(t); if (!_open) _show(); }
+    else if (tries > 450) clearInterval(t); /* حد أقصى ~3 دقائق */
+  }, 400);
+}
+
 function _show() {
   _build();
   _hideMini();
@@ -117,7 +137,7 @@ function _showMini() {
     _mini.className = "apk-mini";
     _mini.src = IMG_SAD;
     _mini.alt = "";
-    _mini.addEventListener("click", () => { if (!_open) _show(); });
+    _mini.addEventListener("click", () => { if (!_open) _showWhenClear(); });
     document.body.appendChild(_mini);
   }
   requestAnimationFrame(() => _mini.classList.add("show"));
@@ -182,7 +202,7 @@ window.__apkPromptAfterLogin = function () {
       if (_isApp() || !window.currentUser || !window.db) return;
       if (!(await _enabled())) return;
       _sizeTxt = await _appSizeText();
-      if (window.currentUser) _whenActive(() => { if (window.currentUser && !_open) _show(); });
+      if (window.currentUser) _whenActive(() => { if (window.currentUser && !_open) _showWhenClear(); });
     } finally { _busy = false; }
   }, 1500);
 };
