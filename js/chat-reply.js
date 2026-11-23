@@ -14,6 +14,7 @@ function _isPrivateDMChat() {
 window._isPrivateDMChat = _isPrivateDMChat;
 
 function setReply(data) {
+  if(window._currentChatId === 'public')data=window.BariqProfanity.payload({...data}, 'public');
   _replyData = data;
   const bar  = document.getElementById("replyBar");
   const name = document.getElementById("replyBarName");
