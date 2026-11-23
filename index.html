@@ -1916,7 +1916,7 @@ import {
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentSingleTabManager,
   doc, setDoc, getDoc, updateDoc, deleteDoc,
-  collection, addDoc, getDocs, getCountFromServer, writeBatch,
+  collection, addDoc, getDocs, getDocsFromServer, getCountFromServer, writeBatch, runTransaction,
   query, orderBy, onSnapshot, serverTimestamp,
   limit, where, startAfter, deleteField,
   arrayUnion, arrayRemove, increment,
@@ -2023,6 +2023,81 @@ async function _sendNotification(recipientUid, title, body, data) {
       });
     } catch (e) { console.warn("DM push trigger failed:", e); }
   } catch(e) {}
+}
+
+/* Content notification distributor: local candidate, separate from legacy chat/call Push. */
+async function _notifyAllUsers(title, body, data, context) {
+  const result = { created: 0, exists: 0, skipped: 0, failed: 0, aborted: 0, unsupported: 0, directoryFailed: false };
+  const senderUid = context?.senderUid;
+  const worldId = context?.worldId;
+  const sourceId = context?.contentId;
+  const type = context?.colName;
+  const safePart = v => typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v);
+  const sameActor = () => currentUser?.uid === senderUid && isAdmin() &&
+    (isOwner() || window.currentUserWorldId?.() === worldId);
+  if (!safePart(senderUid) || !safePart(sourceId) || !window.isValidWorldId?.(worldId) ||
+      !["news", "lectures", "exams", "sections"].includes(type) || data?.type !== type || !sameActor()) {
+    result.aborted = 1;
+    return result;
+  }
+  let directory;
+  try {
+    directory = await getDocsFromServer(query(collection(db, "users"), where("worldId", "==", worldId)));
+    if (directory.metadata?.fromCache) throw new Error("Content notification directory is not server-confirmed");
+  } catch (_) {
+    result.directoryFailed = true;
+    return result;
+  }
+  const recipients = new Set();
+  directory.docs.forEach(d => { if (d.data().worldId === worldId) recipients.add(d.id); });
+  recipients.add(OWNER_UID);
+  recipients.delete(senderUid);
+  const ids = [...recipients];
+  let next = 0;
+  const messageTitle = String(title || "").slice(0, 200);
+  const messageBody = String(body || "").slice(0, 300);
+  async function worker() {
+    while (next < ids.length) {
+      if (!sameActor()) {
+        result.aborted += ids.length - next;
+        next = ids.length;
+        return;
+      }
+      const recipientUid = ids[next++];
+      if (!safePart(recipientUid)) { result.unsupported++; continue; }
+      const notificationId = "content-v1~" + type + "~" + sourceId + "~" + recipientUid;
+      const notificationRef = doc(db, "fcmNotifications", notificationId);
+      try {
+        const outcome = await runTransaction(db, async tx => {
+          if (!sameActor()) throw new Error("Content notification account changed");
+          const existing = await tx.get(notificationRef);
+          if (existing.exists()) return "exists";
+          const pref = await tx.get(doc(db, "users", recipientUid, "settings", "notifPrefs"));
+          if (pref.exists()) {
+            const value = pref.data()[type];
+            if (value === false) return "skipped";
+            if (value !== undefined && value !== true) throw new Error("Invalid content notification preference");
+          }
+          if (!sameActor()) throw new Error("Content notification account changed");
+          tx.set(notificationRef, {
+            recipientUid,
+            title: messageTitle,
+            body: messageBody,
+            data: { type, sourceId, worldId, senderUid, tag: type + "-" + sourceId },
+            createdAt: serverTimestamp(),
+            read: false,
+          });
+          return "created";
+        });
+        result[outcome]++;
+      } catch (_) {
+        if (!sameActor()) result.aborted++;
+        else result.failed++;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, () => worker()));
+  return result;
 }
 
 /* ── DM notification ── */
@@ -4040,6 +4115,7 @@ function makeAdder(btnId, getFields, colName, successMsg, reloadFn) {
     if (!_worldId) { toast("لا يوجد عالم نشط — تعذّرت الإضافة", "error"); return; }
     const fields = getFields();
     if (!fields) return;
+    const _senderUid = currentUser?.uid;
     let saved = false;
     let _newId = null;
     try {
@@ -4060,8 +4136,13 @@ function makeAdder(btnId, getFields, colName, successMsg, reloadFn) {
       _notifyAllUsers(
         _nt[colName] || "🔔 محتوى جديد",
         fields.title || fields.subject || fields.name || "",
-        { type: colName, tag: colName + "-new" }
-      ).catch(() => {});
+        { type: colName },
+        { senderUid: _senderUid, worldId: _worldId, contentId: _newId, colName }
+      ).then(result => {
+        if (result.directoryFailed || result.failed || result.aborted || result.unsupported) {
+          console.warn("Content notification distribution incomplete:", result);
+        }
+      }).catch(() => { console.warn("Content notification distribution failed after saving content"); });
     }
   });
 }
