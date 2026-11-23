@@ -77,8 +77,8 @@ test('every inline handler function is defined somewhere',()=>{
  for(const n of names){if(skip.has(n))continue;
   const re=new RegExp('(function\\s+'+n.replace(/\$/g,'\\$')+'\\b|window\\.'+n.replace(/\$/g,'\\$')+'\\s*=|window\\[[\'"]'+n+'[\'"]\\]\\s*=|\\b'+n.replace(/\$/g,'\\$')+'\\s*[:=]\\s*(async\\s*)?(function|\\())');
   if(!re.test(corpus))missing.push(n)}
- // known pre-existing gap, tracked as a separate card (users manager refresh button)
- const known=new Set(['loadOwnerUsers','loadOwnerStats','confirm','stopPropagation']);
+ // loadOwnerUsers/loadOwnerStats are now exported to window (users manager refresh fix)
+ const known=new Set(['confirm','stopPropagation']);
  assert.deepEqual(missing.filter(n=>!known.has(n)),[]);
 });
 test('service worker precaches app-main and cache version is moved forward',()=>{
