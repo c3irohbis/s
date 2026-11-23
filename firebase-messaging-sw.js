@@ -32,8 +32,8 @@ messaging.onBackgroundMessage(function(payload) {
   const title = data.title || 'نظام الجامعة';
   const options = {
     body:               data.body || '',
-    icon:               '/favicon.ico',
-    badge:              '/favicon.ico',
+    icon:               new URL('images/app-icon.png', self.registration.scope).href,
+    badge:              new URL('images/app-icon.png', self.registration.scope).href,
     data:               data,
     dir:                'rtl',
     lang:               'ar',
@@ -68,7 +68,7 @@ self.addEventListener('notificationclick', function(event) {
    رقم CACHE_VERSION عشان المستخدمين ياخدوا النسخة الجديدة.
    ══════════════════════════════════════════ */
 
-const CACHE_VERSION = 'v28'; // بطاقة فحص 3: توسيع الـprecache لكل ملفات الشيل + مطابقة الطلبات متجاهلة ?v= // fix users-manager refresh (window.loadOwnerUsers/Stats); split phase 4: js/app/*.js modules; المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
+const CACHE_VERSION = 'v29'; // بطاقة فحص 4: أيقونة الإشعارات كانت /favicon.ico (غير موجودة ومسار مطلق يكسر تحت مجلد Pages) // بطاقة فحص 3: توسيع الـprecache لكل ملفات الشيل + مطابقة الطلبات متجاهلة ?v= // fix users-manager refresh (window.loadOwnerUsers/Stats); split phase 4: js/app/*.js modules; المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
 const CACHE_NAME = 'bariq-shell-' + CACHE_VERSION;
 const MEDIA_CACHE_NAME = 'bariq-media-' + CACHE_VERSION;
 
