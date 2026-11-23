@@ -108,6 +108,7 @@ if ("serviceWorker" in navigator) {
 </style>
 <link rel="stylesheet" href="css/forum-cards-colors.css">
 <link rel="stylesheet" href="css/theme-light-fix.css?v=3">
+<link rel="stylesheet" href="css/ai-assistant.css?v=1">
 </head>
 <body>
 
@@ -910,22 +911,22 @@ if ("serviceWorker" in navigator) {
       </button>
       <div class="avatar-wrap">
         <div class="avatar-ring ai-ring">
-          <div class="ai-avatar" style="width:100%;height:100%;border-radius:50%;"><i class="fa-solid fa-sparkles"></i></div>
+          <div class="ai-avatar" style="width:100%;height:100%;border-radius:50%;"><img src="images/mascot/ui/ai-bariq.webp" alt="بريق"></div>
         </div>
       </div>
       <div class="chat-header-info">
-        <div class="name">المساعد الذكي <span class="ai-badge">AI</span></div>
-        <div class="status online"><span class="dot"></span><span id="aiChatStatus">مساعد ذكي لموقع معهد القاهرة</span></div>
+        <div class="name">بريق <span class="ai-badge">AI</span></div>
+        <div class="status online"><span class="dot"></span><span id="aiChatStatus">دليلك للموقع • بدون API</span></div>
       </div>
     </div>
 
     <div class="chat-body" id="aiChatBody"></div>
 
     <div class="chat-input" id="aiChatInputBar">
-      <button class="plus-btn" title="إرفاق"><i class="fa-solid fa-plus"></i></button>
+      
       <div class="input-pill">
-        <input class="inp" type="text" id="aiChatInput" placeholder="اسأل المساعد الذكي..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other">
-        <button class="mic-btn" title="رسالة صوتية"><i class="fa-solid fa-microphone"></i></button>
+        <input class="inp" type="text" id="aiChatInput" placeholder="اسأل بريق عن الموقع..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other">
+        
       </div>
       <button class="send-btn" id="aiSendBtn" title="إرسال" onclick="window._sendToAI?.()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="transform:scaleX(-1)"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
@@ -1933,7 +1934,8 @@ function ownerToggleSection(headerEl) {
 <script src="js/bubble-blur.js" defer></script>
 <script src="js/bubble-gradient-scroll.js" defer></script>
 <script src="js/lightbox.js" defer></script>
-<script src="js/ai-assistant.js?v=2"></script>
+<script src="js/ai-knowledge.js?v=1"></script>
+<script src="js/ai-assistant.js?v=3"></script>
 <!-- ══════════════════════════════════════════
      SETTINGS MODAL — Full Screen Sheet
 ══════════════════════════════════════════ -->
