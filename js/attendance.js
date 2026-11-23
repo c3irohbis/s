@@ -35,6 +35,7 @@ function _worldId() {
   return (typeof window.activeWorldContext === "function") ? window.activeWorldContext() : null;
 }
 
+const _escHtml = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const DAY_LABELS = {
   sunday: "الأحد", monday: "الإثنين", tuesday: "الثلاثاء",
   wednesday: "الأربعاء", thursday: "الخميس", friday: "الجمعة", saturday: "السبت"
@@ -235,8 +236,8 @@ function _renderSubjectsStep() {
   stepEl.style.display = "";
   const listEl = _el("attPopupSubjectsList");
   listEl.innerHTML = _pendingSubjects.map(s => `
-    <label class="att-subj-row" data-name="${s.name}">
-      <span class="att-subj-name">${s.name}</span>
+    <label class="att-subj-row" data-name="${_escHtml(s.name)}">
+      <span class="att-subj-name">${_escHtml(s.name)}</span>
       <span class="att-subj-toggle">
         <input type="checkbox" class="att-subj-check" checked>
         <span class="att-subj-state">حضرت</span>
@@ -409,7 +410,7 @@ window.__attShowDayDetail = (ds) => {
   if (!rec) { wrap.innerHTML = `<div class="empty-state">لا يوجد سجل لهذا اليوم</div>`; return; }
   const subjRows = (rec.subjects || []).map(s => `
     <div class="att-detail-subj ${s.status === "present" ? "good" : "bad"}">
-      <i class="fa-solid ${s.status === "present" ? "fa-check" : "fa-xmark"}"></i> ${s.name}
+      <i class="fa-solid ${s.status === "present" ? "fa-check" : "fa-xmark"}"></i> ${_escHtml(s.name)}
     </div>`).join("");
   wrap.innerHTML = `
     <div class="att-detail-title">${ds}</div>
