@@ -155,10 +155,11 @@ window.pollRemoveOption = function(btn) {
 
 window.pollSubmit = async function() {
   if (!window.currentUser) return;
-  const question = document.getElementById("pollQuestion").value.trim();
+  const publicMask = s => window._currentChatId === 'public' ? window.BariqProfanity.mask(s) : s;
+  const question = publicMask(document.getElementById("pollQuestion").value.trim());
   if (!question) { window.toast("اكتب سؤال الاستطلاع","warn"); return; }
   const inputs  = document.querySelectorAll("#pollOptionsList .poll-opt-inp");
-  const options = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
+  const options = Array.from(inputs).map(i => publicMask(i.value.trim())).filter(Boolean);
   if (options.length < 2) { window.toast("أضف خيارين على الأقل","warn"); return; }
   if (new Set(options).size !== options.length) { window.toast("الخيارات يجب أن تكون مختلفة","warn"); return; }
 
@@ -350,7 +351,8 @@ window.cancelEdit = _hideEditBar;
 async function _saveEdit() {
   if (!_editDocId || !window.currentUser) return;
   const input = document.getElementById("chatInput");
-  const newText = input ? input.value.trim() : "";
+  const rawText = input ? input.value.trim() : "";
+  const newText = window._currentChatId === 'public' ? window.BariqProfanity.mask(rawText) : rawText;
   if (!newText) { window.toast("لا يمكن حفظ رسالة فارغة", "warn"); return; }
   if (newText === _editOrigText) { _hideEditBar(); return; }
   try {
