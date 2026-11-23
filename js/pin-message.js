@@ -101,7 +101,7 @@ function ctxPin() {
   const d = _ctxData;
   const pinData = {
     msgId:      _ctxDocId,
-    text:       d.text || null,
+    text:       d.text ? (window._currentChatId === 'public' ? window.BariqProfanity.mask(d.text) : d.text) : null,
     image:      d.image ? true : null,
     audio:      d.audio ? true : null,
     pdf:        d.pdf   ? true : null,
