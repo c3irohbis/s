@@ -284,6 +284,9 @@ window._dmsSwitchTab = function(btn, panel) {
   if (panel === "members" && typeof window.renderMembersList === "function") {
     window.renderMembersList("", "dmsMembersList");
   }
+  if (panel === "calls" && window.BisCallHistory && typeof window.BisCallHistory.renderCallsList === "function") {
+    window.BisCallHistory.renderCallsList("dmsCallsList");
+  }
   // خطوة 5.2 — نص placeholder صندوق البحث حسب التاب النشط
   const searchInp = document.getElementById("dmsSearchInp");
   if (searchInp) {
@@ -294,7 +297,7 @@ window._dmsSwitchTab = function(btn, panel) {
   // خطوة 5.3 — عنوان الصفحة يتغيّر حسب التاب النشط
   const titleEl = document.querySelector("#page-dms .dms-header-title");
   if (titleEl) {
-    titleEl.textContent = panel === "members" ? "المستخدمون" : "الدردشات";
+    titleEl.textContent = panel === "members" ? "المستخدمون" : (panel === "calls" ? "المكالمات" : "الدردشات");
   }
   window._dmsRefreshFoldEffects?.();
 };
