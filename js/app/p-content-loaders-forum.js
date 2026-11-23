@@ -62,6 +62,18 @@ const _renderSectionDoc = docu => {
     return div;
   };
 
+let _bariqNewsSnapshot = null;
+function _bariqRememberNews(key, docs, ctx) {
+  if (key !== 'news') return;
+  _bariqNewsSnapshot = {uid:ctx.uid, world:ctx.world, at:Date.now(), rows:docs.map(x=>{
+    const d=x.data();return {title:String(d.title||''),body:String(d.body||''),date:d.createdAt?.toDate?.()?.toISOString?.()||null};
+  })};
+}
+window.BariqLoadedNews = () => {
+  const ctx=_forumLiveCtx(), s=_bariqNewsSnapshot;
+  if (!s || s.uid!==ctx.uid || s.world!==ctx.world) return null;
+  return {at:s.at,world:s.world,rows:s.rows.map(x=>({...x}))};
+};
 const _forumLive = {
   news:     { content: "tab-news-content",     list: "newsList",     col: "news",     render: _renderNewsDoc },
   exams:    { content: "tab-exams-content",    list: "examsList",    col: "exams",    render: _renderExamDoc },
@@ -144,6 +156,7 @@ async function _forumLiveStart(key, ctx) {
       if (!docs.length) { list.innerHTML = _FORUM_EMPTY_HTML; }
       else els.forEach(el => { if (el) list.appendChild(el); });
       e.rendered = true; e.dataSig = ctx.sig;
+      _bariqRememberNews(key, docs, ctx);
     };
     let served = false;
     try { served = await window.CardGateway.serveCard(key, ctx, renderGwDocs); }
@@ -186,6 +199,7 @@ async function _forumLiveStart(key, ctx) {
       if (!docs.length) { list.innerHTML = _FORUM_EMPTY_HTML; }
       else els.forEach(el => { if (el) list.appendChild(el); });
       e.rendered = true; e.dataSig = ctx.sig;
+      _bariqRememberNews(key, docs, ctx);
     }, (err) => {
       if (gen !== e.gen) return;
       console.error(err);
