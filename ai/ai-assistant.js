@@ -51,7 +51,7 @@
     else body.scrollTop=0;
   }
   function tableHtml(t) {
-    return `<div class="bariq-table-wrap"><table class="bariq-table"><thead><tr>${t.headers.map(h=>`<th>${escape(h)}</th>`).join('')}</tr></thead><tbody>${t.rows.map(r=>`<tr>${r.map(c=>`<td>${escape(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    return `<div class="bariq-action-note">اسحب الجدول أفقيًا لعرض باقي الأعمدة.</div><div class="bariq-table-wrap"><table class="bariq-table"><thead><tr>${t.headers.map(h=>`<th>${escape(h)}</th>`).join('')}</tr></thead><tbody>${t.rows.map(r=>`<tr>${r.map(c=>`<td>${escape(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   }
   function account() {
     const u=window.currentUser, d=window._currentUserData;
