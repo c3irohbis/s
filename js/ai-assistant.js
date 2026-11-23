@@ -60,15 +60,15 @@
   function topicHtml(t) {
     const children=kb.topics.filter(x=>x.parent===t.id);
     return `<h3 class="bariq-topic-title">${escape(t.title)}</h3>`+t.sections.map(s=>`<section class="bariq-section"><h4>${escape(s.title)}</h4><p>${escape(s.text)}</p></section>`).join('')+
-      (children.length?`<div class="bariq-follow-title">تحب تعرف إيه كمان؟</div><div class="bariq-options">${children.map(c=>chip(c.id)).join('')}</div>`:'')+
       (t.action?`<button type="button" class="bariq-action" data-bariq-action="${escape(t.action)}">${escape(labels[t.action]||'افتح '+t.title)} <span aria-hidden="true">↗</span></button><p class="bariq-action-note">الزر بيفتح القسم الأصلي، وممكن يبدأ تحميل محتواه المعتاد. مش بيحفظ أو يرسل حاجة.</p>`:'')+
+      (children.length?`<div class="bariq-follow-title">تحب تعرف إيه كمان؟</div><div class="bariq-options">${children.map(c=>chip(c.id)).join('')}</div>`:'')+
       `<div class="bariq-topic-nav">${t.parent?`<button type="button" data-bariq-topic="${escape(t.parent)}">رجوع لـ ${escape(byId[t.parent].title)}</button>`:''}<button type="button" data-bariq-root>كل الأسئلة الشائعة</button></div>`;
   }
   function render() {
     const body=document.getElementById('aiChatBody'); if(!body) return;
     body.innerHTML=`<div class="bariq-hero"><img src="images/mascot/ui/ai-bariq.webp" alt="بريق" width="76" height="76"><div><strong>بريق معاك</strong><span>دليلك للموقع، خطوة بخطوة</span></div></div>`+messages.map(m=>`<div class="msg-row ${m.out?'me':'other'}"><div class="msg-bubble-group"><div class="msg-line"><div class="bubble ${m.out?'me':'other'}"><div class="bubble-text">${m.topic?topicHtml(byId[m.topic]):escape(m.text)}${m.choices?`<div class="bariq-options">${m.choices.map(chip).join('')}</div>`:''}</div></div></div><div class="bubble-meta ${m.out?'':'other'}"><span class="bubble-time">${new Date(m.ts).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'})}</span></div></div></div>`).join('');
     const rows=body.querySelectorAll('.msg-row');
-    if(rows.length>1) rows[rows.length-1].scrollIntoView({block:'start',behavior:'smooth'});
+    if(rows.length>1) rows[rows.length-1].scrollIntoView({block:'start',behavior:'instant'});
     else body.scrollTop=0;
   }
   function push(m) {messages.push({...m,ts:Date.now()}); if(messages.length>40) messages=messages.slice(-40);render();}
