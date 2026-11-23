@@ -429,6 +429,13 @@
       open({ kind: "chat", chatId: [uid, peerUid].sort().join("_"), peerUid: peerUid });
     },
     record: record,
+    resolveIncoming: async function (callerUid, signalAt) {
+      try {
+        var d = await api('/v1/calls/incoming?callerUid=' + encodeURIComponent(callerUid) + '&signalAt=' + encodeURIComponent(signalAt));
+        if (d && d.record) { loadCache(me()); upsert(d.record); saveCache(); return d.record; }
+      } catch (e) {}
+      return null;
+    },
     onSignal: onSignal,
     sync: sync,
     _internals: { loadCache: loadCache, upsert: upsert, saveCache: saveCache, statusLabel: statusLabel, isMissed: isMissed, fmtDur: fmtDur, directionOf: directionOf, bubbleRow: bubbleRow, snapshot: function () { return cache; } }
