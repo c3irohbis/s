@@ -40,9 +40,24 @@ function _drawMessages(chatId, initial = false) {
   container.innerHTML = "";
   _renderDate = null; _renderSender = null;
   const docs = [..._messageStore.values()].sort(_compareDocs);
-  if (!docs.length) container.innerHTML = '<div class="empty-state" style="margin:auto;">لا توجد رسائل بعد</div>';
+  /* بطاقة سجل المكالمات: دمج فقاعات أحداث المكالمات وسط الرسائل مرتبة بالوقت.
+     المصدر كاش js/call-history.js المحلي فقط (مزود اختياري — غيابه لا يغيّر
+     أي سلوك قائم)، ولا يحدث أي طلب شبكة من هذا الملف. */
+  let _callEvents = [];
+  try {
+    if (typeof window._chatCallEvents === "function" && window.currentUser?.uid &&
+        typeof chatId === "string" && chatId !== "public" && !chatId.startsWith("room:")) {
+      _callEvents = window._chatCallEvents([window.currentUser.uid, chatId].sort().join("_")) || [];
+    }
+  } catch(e) { _callEvents = []; }
+  if (!docs.length && !_callEvents.length) container.innerHTML = '<div class="empty-state" style="margin:auto;">لا توجد رسائل بعد</div>';
   if (!_allLoaded) _insertLoadMoreBtn(container, chatId);
-  docs.forEach(d => _appendStoredMessage(container,d));
+  let _ce = 0;
+  docs.forEach(d => {
+    while (_ce < _callEvents.length && _callEvents[_ce].ts <= _stamp(d)) container.appendChild(_callEvents[_ce++].el);
+    _appendStoredMessage(container,d);
+  });
+  while (_ce < _callEvents.length) container.appendChild(_callEvents[_ce++].el);
   const behavior = container.style.scrollBehavior;
   container.style.scrollBehavior = "auto";
   if (nearBottom) container.scrollTop = container.scrollHeight;
@@ -321,6 +336,10 @@ window._stopChatListener = () => {
   window._cleanupPollListeners?.();
   const container=document.getElementById('chatMessages');
   if(container) container.onscroll=null;
+};
+/* إعادة رسم المحادثة المفتوحة عند وصول أحداث سجل مكالمات جديدة للكاش */
+window._chatRedraw = () => {
+  try { if (_activeChatId && _chatIsVisible()) _drawMessages(_activeChatId); } catch(e) {}
 };
 window._resumeVisibleChat=()=>{
   if(_chatIsVisible() && !_activeChatId && window.currentUser?.uid)
