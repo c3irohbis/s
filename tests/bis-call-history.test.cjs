@@ -228,3 +228,13 @@ test('legacy incoming resolver is recipient-scoped, time-bounded and refuses amb
   await worker.fetch(req('POST','/v1/calls/ring',A,{callId:callId(),chatId:chatAB,calleeUid:B,callType:'audio'}),env);
   r=await worker.fetch(req('GET',route,B),env);assert.equal(r.status,409);assert.equal((await r.json()).error,'ambiguous-signal');
 });
+
+test('join failure is participant-only, accepted-only, no invented duration',async()=>{
+  table=[];const id=callId();
+  await worker.fetch(req('POST','/v1/calls/ring',A,{callId:id,chatId:chatAB,calleeUid:B,callType:'audio'}),env);
+  let r=await worker.fetch(req('POST','/v1/calls/'+id+'/fail',A,{}),env);assert.equal(r.status,409);
+  await worker.fetch(req('POST','/v1/calls/'+id+'/accept',B,{}),env);
+  r=await worker.fetch(req('POST','/v1/calls/'+id+'/fail',C,{}),env);assert.equal(r.status,403);
+  r=await worker.fetch(req('POST','/v1/calls/'+id+'/fail',A,{}),env);assert.equal(r.status,200);
+  const row=(await r.json()).record;assert.equal(row.status,'failed');assert.equal(row.duration_sec,null);assert.equal(row.ended_at,null);
+});
