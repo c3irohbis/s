@@ -68,7 +68,7 @@ self.addEventListener('notificationclick', function(event) {
    رقم CACHE_VERSION عشان المستخدمين ياخدوا النسخة الجديدة.
    ══════════════════════════════════════════ */
 
-const CACHE_VERSION = 'v23'; // المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
+const CACHE_VERSION = 'v25'; // المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
 const CACHE_NAME = 'bariq-shell-' + CACHE_VERSION;
 const MEDIA_CACHE_NAME = 'bariq-media-' + CACHE_VERSION;
 
@@ -96,7 +96,7 @@ const PRECACHE_PATHS = [
   'js/back-nav.js', 'js/bubble-blur.js', 'js/bubble-color.js', 'js/change-password.js',
   'js/chat-backgrounds.js', 'js/chat-search.js', 'js/connectivity.js', 'js/dm-extras.js',
   'js/dms-page.js', 'js/draft-messages.js', 'js/emoji-picker.js', 'js/auth-ui.js', 'js/auth-bridge.js',
-  'js/library.js', 'js/lightbox.js', 'js/maintenance.js', 'js/mention.js', 'js/military.js',
+  'js/library.js', 'js/lightbox.js', 'js/maintenance.js', 'js/newchat-ui.js', 'js/app-main.js', 'js/mention.js', 'js/military.js',
   'js/notif-panel.js', 'js/notif-settings.js', 'js/pin-message.js', 'js/poll.js',
   'js/report.js', 'js/settings-modal.js', 'js/skeleton-loader.js',
   'js/splash.js', 'js/theme-toggle.js', 'js/upload-engine.js',
