@@ -178,3 +178,9 @@ test('integration hooks: calls.js records before signaling; chat-listener merges
   assert.ok(worker.includes("status=eq.accepted"),'end is first-writer-wins');
   assert.ok(worker.includes('duration_sec'),'server computes duration');
 });
+
+test('central calls entry and row chat route use the existing app controls', () => {
+  assert.ok(src.includes('dms-fab-item[data-panel="calls"]'));
+  assert.ok(src.includes('window.openDirectChat(p)'));
+  assert.ok(!src.includes('window.openDMChat(p)'));
+});
