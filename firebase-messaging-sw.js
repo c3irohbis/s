@@ -68,7 +68,7 @@ self.addEventListener('notificationclick', function(event) {
    رقم CACHE_VERSION عشان المستخدمين ياخدوا النسخة الجديدة.
    ══════════════════════════════════════════ */
 
-const CACHE_VERSION = 'v27'; // fix users-manager refresh (window.loadOwnerUsers/Stats); split phase 4: js/app/*.js modules; المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
+const CACHE_VERSION = 'v28'; // بطاقة فحص 3: توسيع الـprecache لكل ملفات الشيل + مطابقة الطلبات متجاهلة ?v= // fix users-manager refresh (window.loadOwnerUsers/Stats); split phase 4: js/app/*.js modules; المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
 const CACHE_NAME = 'bariq-shell-' + CACHE_VERSION;
 const MEDIA_CACHE_NAME = 'bariq-media-' + CACHE_VERSION;
 
@@ -106,6 +106,31 @@ const PRECACHE_PATHS = [
   'images/default-student-female.png',
   'images/default-student-male.png',
   'images/military-icon.png',
+
+  // بطاقة فحص 3: باقي ملفات الواجهة اللي index.html بيحمّلها مباشرة أو بالاستيراد (كانت خارج الـprecache)
+  'css/account-archive.css', 'css/admin-redesign.css', 'css/apk-prompt.css', 'css/appearance-page.css',
+  'css/attendance.css', 'css/chat-header.css', 'css/chat-list.css', 'css/chat-newdesign.css',
+  'css/chat-reply.css', 'css/disclaimer-consent.css', 'css/expenses.css', 'css/forum-cards-colors.css',
+  'css/instructions.css', 'css/mascot-designer.css', 'css/mascot-dialog-adapter.css', 'css/mascot-login-adapter.css',
+  'css/mascot-toast-adapter.css', 'css/mascot-underdev-adapter.css', 'css/mascot.css', 'css/my-docs.css',
+  'css/panel-grid.css', 'css/qr-share.css', 'css/quick-notifications.css', 'css/sheetaty.css',
+  'css/site-design.css', 'css/study-schedule.css', 'css/theme-light-fix.css', 'css/tuition-fees.css',
+  'css/update-notice.css', 'css/why-here-forum.css', 'js/account-archive.js', 'js/apk-prompt.js',
+  'js/appearance-page.js', 'js/attendance.js', 'js/bubble-gradient-scroll.js', 'js/calls.js',
+  'js/card-gateway.js', 'js/chat-core.js', 'js/chat-ctxmenu.js', 'js/chat-listener.js',
+  'js/chat-newdesign-camera.js', 'js/chat-newdesign-wiring.js', 'js/chat-presence-text.js', 'js/chat-reactions.js',
+  'js/chat-reply.js', 'js/chat-select.js', 'js/chat-send.js', 'js/disclaimer-consent.js',
+  'js/expenses.js', 'js/firestore-safe.js', 'js/forum-badges.js', 'js/instructions.js',
+  'js/language-ui.js', 'js/language.js', 'js/mascot-assets-registration.js', 'js/mascot-designer.js',
+  'js/mascot-dialog-adapter.js', 'js/mascot-empty-state-adapter.js', 'js/mascot-grades-adapter.js', 'js/mascot-loading-adapter.js',
+  'js/mascot-login-adapter.js', 'js/mascot-notification-adapter.js', 'js/mascot-notifs.js', 'js/mascot-override.js',
+  'js/mascot-settings-adapter.js', 'js/mascot-splash-adapter.js', 'js/mascot-toast-adapter.js', 'js/mascot-underdev-adapter.js',
+  'js/mascot.js', 'js/members-list.js', 'js/my-docs.js', 'js/notif-permission.js',
+  'js/other-bubble-color.js', 'js/pwa-install.js', 'js/qr-share.js', 'js/quick-notifications.js',
+  'js/schedule-repository.js', 'js/sheetaty.js', 'js/site-design.js', 'js/study-schedule-reminder.js',
+  'js/study-schedule.js', 'js/tuition-fees.js', 'js/update-notice.js', 'js/updates-check.js',
+  'js/why-here-forum.js', 'js/world-model.js', 'lang/egyptian.js', 'lang/english.js',
+  'lost-found/css/lost-found.css', 'lost-found/js/lost-found.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -188,13 +213,17 @@ self.addEventListener('fetch', (event) => {
 
   // باقي الملفات الثابتة (CSS/JS/صور) — كاش أولًا للسرعة وللعمل بدون نت،
   // مع تحديث النسخة المخزنة في الخلفية كل ما فيه اتصال (stale-while-revalidate)
+  // مفتاح الكاش بدون ?v= عشان طلبات index.html المعنونة بالإصدار تطابق نسخة الـprecache،
+  // وأي تحديث من الشبكة يخزن على نفس المفتاح (أحدث نسخة دايمًا)
+  const bareUrl = new URL(req.url); bareUrl.search = '';
+  const cacheKey = bareUrl.toString();
   event.respondWith(
-    caches.match(req).then((cached) => {
+    caches.match(cacheKey).then((cached) => {
       const networkFetch = fetch(req)
         .then((res) => {
           if (res && res.status === 200) {
             const resClone = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
+            caches.open(CACHE_NAME).then((cache) => cache.put(cacheKey, resClone));
           }
           return res;
         })
