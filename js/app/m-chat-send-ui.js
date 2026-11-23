@@ -25,7 +25,7 @@ async function sendChatMsg() {
   if (now - _lastSendTime < SPAM_INTERVAL_MS) { toast("انتظر قليلاً", "warn"); return; }
 
   const input = document.getElementById("chatInput");
-  const text  = input.value.trim();
+  const text  = _currentChatId === 'public' ? window.BariqProfanity.mask(input.value.trim()) : input.value.trim();
   if (!text) return; // منع الرسائل الفارغة
 
   _isSending    = true;
@@ -64,6 +64,7 @@ async function sendChatMsg() {
       })
     };
 
+    window.BariqProfanity.payload(msgData, _currentChatId);
     await addDoc(collection(db, colPath), msgData);
 
     // ── حذف المسودة بعد الإرسال الناجح ──
@@ -228,6 +229,7 @@ document.getElementById("chatFileInput").addEventListener("change", async () => 
       })
     };
 
+    window.BariqProfanity.payload(msgData, _currentChatId);
     await addDoc(collection(db, colPath), msgData);
 
     if (isPrivate && !_currentChatId.startsWith("room:")) {
