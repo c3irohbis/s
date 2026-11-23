@@ -128,6 +128,19 @@ async function handle(req, env) {
     const q = '/call_records?or=(caller_uid.eq.' + esc(uid) + ',callee_uid.eq.' + esc(uid) + ')&updated_at=gt.' + encodeURIComponent(ts) + '&order=updated_at.asc&limit=100';
     return response(req, 200, {records: (await sb(env, 'GET', q)) || [], ts: nowIso()});
   }
+  /* Resolve the legacy ringing signal without adding fields to Firebase. */
+  if (req.method === 'GET' && path === '/v1/calls/incoming') {
+    if (!rateLimit('r:'+uid, 120)) return response(req, 429, {error:'rate-limited'});
+    const caller = url.searchParams.get('callerUid'), at = Date.parse(url.searchParams.get('signalAt') || '');
+    if (!isUid(caller) || caller === uid || !Number.isFinite(at) || Math.abs(Date.now()-at)>120000)
+      return response(req, 400, {error:'bad-signal'});
+    const q='/call_records?caller_uid=eq.'+esc(caller)+'&callee_uid=eq.'+esc(uid)+
+      '&status=eq.ringing&started_at=gte.'+encodeURIComponent(new Date(at-15000).toISOString())+
+      '&started_at=lte.'+encodeURIComponent(new Date(at+2000).toISOString())+'&order=started_at.desc&limit=2';
+    const rows=(await sb(env,'GET',q))||[];
+    if(rows.length!==1) return response(req,409,{error:rows.length?'ambiguous-signal':'record-pending'});
+    return response(req,200,{record:rows[0]});
+  }
   const mOne = /^\/v1\/calls\/([0-9a-fA-F-]{36})$/.exec(path);
   if (req.method === 'GET' && mOne) {
     if (!rateLimit('r:'+uid, 120)) return response(req, 429, {error:'rate-limited'});
