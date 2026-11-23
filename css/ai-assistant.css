@@ -29,3 +29,23 @@
 .theme-light .bariq-section h4{color:#725e38}
 @media(min-width:700px){#page-ai-chat .chat-body{padding-left:24px;padding-right:24px}.bariq-options{grid-template-columns:1fr 1fr}}
 @media(prefers-reduced-motion:reduce){#page-ai-chat *{scroll-behavior:auto!important}}
+/* Compact FAQ density, matching the slim-row reference. */
+#page-ai-chat .bubble-text{font-size:12px;line-height:1.65}
+#page-ai-chat .msg-row.other .bubble{padding:10px 12px;border-radius:12px}
+.bariq-options{display:flex;flex-direction:column;gap:0;margin-top:8px;background:rgba(208,177,111,.035);border-radius:9px;overflow:hidden}
+#page-ai-chat button.bariq-chip{min-height:36px;padding:7px 9px;border:0;border-bottom:1px solid rgba(160,160,160,.17);border-radius:0;background:transparent;font-size:12px;line-height:1.55}
+#page-ai-chat button.bariq-chip:last-child{border-bottom:0}
+.bariq-chip span{font-size:16px}
+.bariq-hero{padding:3px 0 10px;gap:8px}
+.bariq-hero img{width:54px;height:54px}
+.bariq-hero strong{font-size:16px}
+.bariq-hero span{font-size:10px}
+#page-ai-chat .bariq-topic-title{font-size:14px;margin-bottom:8px}
+.bariq-section{margin-bottom:9px}
+.bariq-section h4{font-size:11px;margin-bottom:3px}
+.bariq-section p{font-size:12px;line-height:1.75}
+.bariq-follow-title{font-size:11px;margin-top:9px}
+#page-ai-chat button.bariq-action{min-height:36px;padding:8px;margin-top:10px;border-radius:9px;font-size:12px}
+#page-ai-chat .bariq-action-note{font-size:9px}
+.bariq-topic-nav{margin-top:9px;padding-top:5px}
+#page-ai-chat .bariq-topic-nav button{font-size:10px;min-height:30px}
