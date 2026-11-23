@@ -18,7 +18,7 @@ window.sendChatMsg = async function() {
   const now = Date.now();
   if (now - _lastSendTime < SPAM_INTERVAL_MS) { toast("انتظر قليلاً","warn"); return; }
   const input = document.getElementById("chatInput");
-  const text  = input.value.trim();
+  const text  = _currentChatId === 'public' ? window.BariqProfanity.mask(input.value.trim()) : input.value.trim();
   if (!text) return;
   _isSending = true; _lastSendTime = now;
   const sendBtn = document.getElementById("chatSendBtn");
@@ -51,6 +51,7 @@ window.sendChatMsg = async function() {
       ..._replyData.pdf   ? { pdf:   true, fileName: _replyData.fileName||"" } : {},
       ..._replyData.file  ? { file:  true, fileName: _replyData.fileName||"" } : {},
     };
+    window.BariqProfanity.payload(msgData, _currentChatId);
     await addDoc(collection(db, colPath), msgData);
     const _isTrueDM2 = isPrivate && !_currentChatId.startsWith("room:");
     if (_isTrueDM2) {
