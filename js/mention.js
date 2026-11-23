@@ -8,6 +8,7 @@ import { collection, getDocs, query, orderBy, limit } from "https://www.gstatic.
 ══════════════════════════════════════════ */
 
 const MENTION_CACHE_TTL = 5 * 60 * 1000; // 5 دقائق
+const _escHtml = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let _mentionUsers    = [];
 let _mentionCacheAt  = 0;
 let _mentionActive   = false;
@@ -55,14 +56,14 @@ function _renderDropdown(users) {
 
   const list = users.length
     ? users.map((u, i) => `
-        <div class="mention-item${i === _activeIndex ? " active" : ""}" data-uid="${u.uid}" data-name="${u.name}">
+        <div class="mention-item${i === _activeIndex ? " active" : ""}" data-uid="${u.uid}" data-name="${_escHtml(u.name)}">
           ${u.photo
-            ? `<img class="mention-avatar" src="${u.photo}" alt="">`
+            ? `<img class="mention-avatar" src="${_escHtml(u.photo)}" alt="">`
             : `<div class="mention-avatar">${typeof window._defaultAvatarHTML === "function" ? window._defaultAvatarHTML(u.gender, 32) : ""}</div>`
           }
           <div>
-            <div class="mention-name">${u.name}</div>
-            ${u.publicId ? `<div class="mention-id">#${u.publicId}</div>` : ""}
+            <div class="mention-name">${_escHtml(u.name)}</div>
+            ${u.publicId ? `<div class="mention-id">#${_escHtml(u.publicId)}</div>` : ""}
           </div>
         </div>`).join("")
     : `<div class="mention-empty">لا توجد نتائج</div>`;
@@ -72,7 +73,7 @@ function _renderDropdown(users) {
       <i class="fa-solid fa-magnifying-glass"></i>
       <input class="mention-search-inp" id="mentionSearchInp"
         placeholder="ابحث بالاسم أو الرقم..."
-        value="${_mentionQuery}"
+        value="${_escHtml(_mentionQuery)}"
         autocomplete="off">
     </div>
     <div class="mention-list" id="mentionList">${list}</div>`;
