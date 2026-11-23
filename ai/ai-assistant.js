@@ -93,7 +93,7 @@
     return false;
   }
   function push(m) {messages.push({...m,ts:Date.now()}); if(messages.length>40) messages=messages.slice(-40);render();}
-  function root() {lastTopic=null;const a=account();push({text:`أهلًا${a.name?' يا '+a.name:''}، أنا بريق، دليلك في منتدى الجامعة. أشرح لك، وأرتّب البيانات المحمّلة بالفعل في جلستك، من غير طلبات بيانات جديدة. اسألني عن اسمك أو فرقتك أو إيميل حسابك، أو قول آخر الأخبار أو الشيتات. المحادثة مؤقتة وبتتمسح لما تخرج.`,choices:kb.roots});}
+  function root() {lastTopic=null;const a=account();push({text:`هلا${a.name?' يا '+a.name:''}، أنا صديقك بريق المساعد الشخصي.`,choices:kb.roots});}
   function clearSession() {
     messages=[];lastTopic=null;sending=false;
     const body=document.getElementById('aiChatBody');if(body)body.replaceChildren();
