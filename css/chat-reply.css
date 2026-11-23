@@ -36,7 +36,9 @@
 .reply-preview-text {
   font-size: 12px; color: rgba(255,255,255,.65);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  max-width: 240px;
+  /* inline-block عشان max-width والإخفاء يشتغلوا — كـ span عادي (inline) كانوا بيتجاهلوا والمحتوى بيفيض برة الفقاعة */
+  display: inline-block; vertical-align: bottom;
+  max-width: min(240px, 100%);
 }
 .bubble.me .reply-preview-text { color: var(--user-bubble-text, rgba(255,255,255,.5)); }
 .reply-preview-img {
