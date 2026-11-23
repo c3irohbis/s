@@ -95,7 +95,7 @@ function _fmt(ts) {
 function _av(photo, name, cls) {
   if (cls==="public") return `<div class="dms-conv-avatar dms-conv-avatar-public"><i class="fa-solid fa-graduation-cap"></i></div>`;
   if (cls==="room")   return `<div class="dms-conv-avatar dms-conv-avatar-room"><i class="fa-solid fa-users"></i></div>`;
-  if (cls==="ai")     return `<div class="dms-conv-avatar ai-avatar"><i class="fa-solid fa-sparkles"></i></div>`;
+  if (cls==="ai")     return `<img class="dms-conv-avatar ai-avatar" src="images/mascot/ui/ai-bariq.webp" alt="بريق" style="object-fit:contain">`;
   if (photo) return `<img class="dms-conv-avatar" src="${_escHtml(photo)}" alt="">`;
   return `<div class="dms-conv-avatar dms-conv-avatar-letter">${_escHtml((name||"?").charAt(0).toUpperCase())}</div>`;
 }
