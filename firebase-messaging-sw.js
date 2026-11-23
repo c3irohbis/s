@@ -68,7 +68,7 @@ self.addEventListener('notificationclick', function(event) {
    رقم CACHE_VERSION عشان المستخدمين ياخدوا النسخة الجديدة.
    ══════════════════════════════════════════ */
 
-const CACHE_VERSION = 'v29'; // بطاقة فحص 4: أيقونة الإشعارات كانت /favicon.ico (غير موجودة ومسار مطلق يكسر تحت مجلد Pages) // بطاقة فحص 3: توسيع الـprecache لكل ملفات الشيل + مطابقة الطلبات متجاهلة ?v= // fix users-manager refresh (window.loadOwnerUsers/Stats); split phase 4: js/app/*.js modules; المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
+const CACHE_VERSION = 'v30'; // بطاقة فحص 5: تراجع عن توحيد مفتاح الكاش (كان بيكسر importmap scopes ويوقف الإقلاع) + الاحتفاظ بالـprecache الكامل // بطاقة فحص 4: أيقونة الإشعارات كانت /favicon.ico (غير موجودة ومسار مطلق يكسر تحت مجلد Pages) // بطاقة فحص 3: توسيع الـprecache لكل ملفات الشيل + مطابقة الطلبات متجاهلة ?v= // fix users-manager refresh (window.loadOwnerUsers/Stats); split phase 4: js/app/*.js modules; المرحلة 3.0: js/card-gateway.js الجديد + تعديلات index.html // ← عدّاد غير المقروء يعمل أوفلاين من الكاش المحلي (dms-page.js)
 const CACHE_NAME = 'bariq-shell-' + CACHE_VERSION;
 const MEDIA_CACHE_NAME = 'bariq-media-' + CACHE_VERSION;
 
@@ -213,17 +213,17 @@ self.addEventListener('fetch', (event) => {
 
   // باقي الملفات الثابتة (CSS/JS/صور) — كاش أولًا للسرعة وللعمل بدون نت،
   // مع تحديث النسخة المخزنة في الخلفية كل ما فيه اتصال (stale-while-revalidate)
-  // مفتاح الكاش بدون ?v= عشان طلبات index.html المعنونة بالإصدار تطابق نسخة الـprecache،
-  // وأي تحديث من الشبكة يخزن على نفس المفتاح (أحدث نسخة دايمًا)
-  const bareUrl = new URL(req.url); bareUrl.search = '';
-  const cacheKey = bareUrl.toString();
+  // ملاحظة مهمة: منستخدمش مفتاح موحد بدون ?v= — رد الكاش بيحمل عنوانه الأصلي،
+  // ولو اتقدم لطلب عليه ?v= بيوصل للموديول بعنوان مختلف فيكسر مطابقة scopes بتاعة
+  // الـimportmap (js/firestore-safe.js?v=prefs-1) ويوقف تحميل التطبيق كله.
+  // المطابقة exact زي الأصل، والـprecache بيخدم الملفات المطلوبة بدون إصدار.
   event.respondWith(
-    caches.match(cacheKey).then((cached) => {
+    caches.match(req).then((cached) => {
       const networkFetch = fetch(req)
         .then((res) => {
           if (res && res.status === 200) {
             const resClone = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(cacheKey, resClone));
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
           }
           return res;
         })
