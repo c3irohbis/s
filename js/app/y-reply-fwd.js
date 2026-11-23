@@ -190,6 +190,7 @@ async function forwardMsgTo(targetChatId, msgData) {
   }
 
   try {
+    window.BariqProfanity.payload(payload, targetChatId);
     await addDoc(collection(db, colPath), payload);
 
     // تحديث lastMessage في DM إن كانت خاصة
