@@ -5,6 +5,10 @@
    - الغرفة تُحدَّد وتُتحقق صلاحيتها في الـ Worker فقط (DM: مشارك في privateChats،
      غرفة: نفس worldId أو مالك). المتصفح يرسل peerUid/roomId فقط.
    - أي فشل يُعالَج داخليًا ولا يؤثر على بقية الموقع.
+   - سجل المكالمات (بطاقة سجل المكالمات): أحداث تُرسل fire-and-forget لـ
+     window.BisCallHistory (js/call-history.js) — المصدر الوحيد للسجل هو
+     عامل bis-call-history/Supabase. Firebase هنا للإشارات العابرة فقط،
+     وفشل التسجيل لا يوقف المكالمة أبدًا.
    Globals المعرّفة: window.BisCalls = { start, end, isActive }
    ========================================================================== */
 (function () {
@@ -22,6 +26,21 @@
   function fs() { if (!fsP) fsP = import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js"); return fsP; }
   function myName() { var me = window.currentUser; return ((window._currentUserData && window._currentUserData.name) || (me && me.displayName) || "مستخدم"); }
   function fmtDur(ms) { var s = Math.max(0, Math.floor(ms / 1000)); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); }
+  /* ── سجل المكالمات: أحداث غير حاجبة (لا await)، فشلها لا يمس مسار المكالمة ── */
+  function bchRec(action, payload) {
+    try { if (window.BisCallHistory && payload && payload.callId) window.BisCallHistory.record(action, payload); } catch (e) {}
+  }
+  function bchSync(callId) { /* الطرف اللي سجّل هو الطرف التاني: نجيب النسخة النهائية */
+    try { if (window.BisCallHistory && callId) window.BisCallHistory.onSignal(callId); } catch (e) {}
+  }
+  function newCallId() {
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+    /* بديل بصيغة UUIDv4 (العامل يرفض غيرها) */
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+      var r = Math.random() * 16 | 0, v = c === "x" ? r : (r & 3 | 8);
+      return v.toString(16);
+    });
+  }
   function sigStop() { if (sigUnsub) { try { sigUnsub(); } catch (e) {} sigUnsub = null; } if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; } }
 
   function toast(msg, type) { try { window.toast && window.toast(msg, type || "error"); } catch (e) {} }
@@ -93,9 +112,9 @@
       '<div class="bis-call-videos" id="bisCallVideos" style="display:none"></div>' +
       '<div class="bis-call-parts" id="bisCallParts"></div>' +
       '<div class="bis-call-actions">' +
-      '<button type="button" id="bisCallMute" class="bis-call-btn" title="كتم">🎤</button>' +
-      '<button type="button" id="bisCallCam" class="bis-call-btn" title="فيديو">📷</button>' +
-      '<button type="button" id="bisCallEnd" class="bis-call-btn bis-call-end" title="إنهاء">📞</button>' +
+      '<button type="button" id="bisCallMute" class="bis-call-btn" title="كتم" aria-label="كتم الصوت">🎤</button>' +
+      '<button type="button" id="bisCallCam" class="bis-call-btn" title="فيديو" aria-label="تشغيل الفيديو">📷</button>' +
+      '<button type="button" id="bisCallEnd" class="bis-call-btn bis-call-end" title="إنهاء" aria-label="إنهاء المكالمة">📞</button>' +
       '</div></div>';
     document.body.appendChild(o);
     $("bisCallEnd").addEventListener("click", function () { end(true); });
@@ -189,6 +208,12 @@
         else await F.deleteDoc(ctx.ref);
       } catch (e) {}
     }
+    /* السجل: إنهاء مكالمة متصلة (الطرفان يحاولان — العامل أول-كاتب-يكسب
+       ويرجع نفس السجل)، أو إلغاء رنين من المتصل */
+    if (ctx && ctx.callId) {
+      if (active) bchRec("end", { callId: ctx.callId });
+      else if (ctx.role === "caller") bchRec("cancel", { callId: ctx.callId });
+    }
     var r = lkRoom; lkRoom = null; active = false; starting = false; callUid = null;
     try { if (r) await r.disconnect(); } catch (e) {}
     cleanupAudio(); cleanupVideo();
@@ -227,6 +252,7 @@
         if (!fresh) return;
         if (active || starting || callCtx) { /* مشغول ⇒ رفض تلقائي */
           fs().then(function (F) { return F.updateDoc(F.doc(window.db, "activeCalls", inboxUid), { state: "declined", reason: "busy" }); }).catch(function () {});
+          bchRec("decline", { callId: d.callId, reason: "busy" });
           return;
         }
         showIncoming(d);
@@ -246,8 +272,8 @@
       '<div class="bis-call-inc-name" id="bisIncName">مستخدم</div>' +
       '<div class="bis-call-status">يريد بدء مكالمة معك</div>' +
       '<div class="bis-call-actions">' +
-      '<button type="button" id="bisIncAccept" class="bis-call-btn bis-call-accept" title="رد">📞</button>' +
-      '<button type="button" id="bisIncDecline" class="bis-call-btn bis-call-end" title="رفض">📞</button>' +
+      '<button type="button" id="bisIncAccept" class="bis-call-btn bis-call-accept" title="رد" aria-label="رد على المكالمة">📞</button>' +
+      '<button type="button" id="bisIncDecline" class="bis-call-btn bis-call-end" title="رفض" aria-label="رفض المكالمة">📞</button>' +
       '</div></div>';
     document.body.appendChild(o);
     $("bisIncAccept").addEventListener("click", acceptIncoming);
@@ -270,7 +296,8 @@
       var F = await fs();
       var ref = F.doc(window.db, "activeCalls", inboxUid);
       await F.updateDoc(ref, { state: "accepted" });
-      callCtx = { ref: ref, peerUid: d.callerUid, role: "callee", title: d.callerName || "مكالمة" };
+      callCtx = { ref: ref, peerUid: d.callerUid, role: "callee", title: d.callerName || "مكالمة", callId: d.callId || null };
+      bchRec("accept", { callId: d.callId });
       sigUnsub = F.onSnapshot(ref, onSignal, function () {});
       join({ kind: "dm", peerUid: d.callerUid }, null, callCtx.title);
     } catch (e) { toast(errText(e)); }
@@ -278,7 +305,7 @@
   async function declineIncoming() {
     var d = incomingData; hideIncoming();
     if (!d) return;
-    try { var F = await fs(); await F.updateDoc(F.doc(window.db, "activeCalls", inboxUid), { state: "declined" }); } catch (e) {}
+    try { var F = await fs(); await F.updateDoc(F.doc(window.db, "activeCalls", inboxUid), { state: "declined" }); bchRec("decline", { callId: d.callId }); } catch (e) {}
   }
 
   /* ── الرنين الصادر ── */
@@ -310,7 +337,17 @@
       if (e && e.message === "peer-busy") { toast("الطرف الآخر مشغول حاليًا"); await end(false); return; }
       /* خطأ قراءة/مسح عابر: نكمّل — setDoc هيفشل طبيعي لو لسه فيه مانع */
     }
-    await F.setDoc(ref, { callerUid: callUid, callerName: myName(), calleeUid: target.peerUid, state: "ringing", ts: F.serverTimestamp() });
+    /* تسجيل الرنين قبل الإشارة (السجل لا يشير لمستند غير موجود)، بحد أقصى
+       1.5ث حتى لا يتعطل الرنين لو العامل بطيء — فشله لا يمنع المكالمة */
+    var callId = newCallId();
+    try {
+      await Promise.race([
+        (window.BisCallHistory ? window.BisCallHistory.record("ring", { callId: callId, calleeUid: target.peerUid, calleeName: title, callType: (opts && opts.video) ? "video" : "audio", callerName: myName(), chatId: [callUid, target.peerUid].sort().join("_") }) : null),
+        new Promise(function (res) { setTimeout(res, 1500); })
+      ]);
+    } catch (e) {}
+    callCtx.callId = callId;
+    await F.setDoc(ref, { callerUid: callUid, callerName: myName(), calleeUid: target.peerUid, state: "ringing", ts: F.serverTimestamp(), callId: callId, callType: (opts && opts.video) ? "video" : "audio" });
     sigUnsub = F.onSnapshot(ref, onSignal, function () {});
     ringTimer = setTimeout(function () { finishSignal("لا يوجد رد", true); }, 45000);
     /* إشعار خارجي بالمسار الحالي (احتياطي لو الطرف التاني مش فاتح التطبيق) */
@@ -328,6 +365,7 @@
     var d = snap.data() || {};
     if (d.state === "accepted" && callCtx.role === "caller" && starting) {
       if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; }
+      bchSync(callCtx.callId);
       join({ kind: "dm", peerUid: callCtx.peerUid }, callCtx.opts, callCtx.title);
     } else if (d.state === "declined") {
       /* الرفض يخصنا بس واحنا لسه بنرن — بعد الاتصال بيكون رنين تاني اترد عليه تلقائيًا */
@@ -344,6 +382,14 @@
     sigStop();
     if (msg) toast(msg);
     if (isTimeout && ctx && ctx.ref) { try { fs().then(function (F) { return F.deleteDoc(ctx.ref); }).catch(function () {}); } catch (e) {} }
+    /* السجل: مهلة الرنين = لا يوجد رد؛ إشارة إنهاء أثناء الاتصال = نحاول
+       الإنهاء أيضًا (idempotent)؛ غير ذلك نجيب الحالة النهائية اللي سجّلها
+       الطرف التاني (رفض/انتهاء) */
+    if (ctx && ctx.callId) {
+      if (isTimeout) bchRec("cancel", { callId: ctx.callId, reason: "no_answer" });
+      else if (dur > 0) bchRec("end", { callId: ctx.callId });
+      else bchSync(ctx.callId);
+    }
     end(false, dur);
   }
 
