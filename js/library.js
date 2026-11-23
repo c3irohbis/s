@@ -1,4 +1,4 @@
-import { collection, query, orderBy, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { collection, query, orderBy, where, onSnapshot, limit } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 /* ══════════════════════════════════════════
    LIBRARY SYSTEM — مكتبة المحاضرات
@@ -343,6 +343,12 @@ let _libLiveCtx   = null;    // { uid, world, sig } للمستمع الشغّا�
 let _libDataSig   = null;    // بصمة الحساب+العالم اللي _libAllDocs بتاعتهم
 let _libRendered  = false;   // اتعرضت لقطة مؤكدة (أو بدون عالم) لـ _libDataSig
 
+/* ── ترقيم الصفحات: المستمع الحي يقرأ صفحة واحدة (٦٠) بدل المجموعة كلها، و"عرض المزيد" يوسّعها ── */
+const _LIB_PAGE       = 60;
+let _libLiveLimit     = _LIB_PAGE;  // حجم الصفحة الحالي للمستمع الحي
+let _libMayHaveMore   = false;      // يُضبط من لقطة سيرفر مؤكدة امتلأت للحد
+let _libLoadingMore   = false;      // ضغطة "عرض المزيد" جارية
+
 const _LIB_SPINNER_HTML     = `<div style="grid-column:1/-1"><div class="spinner"></div></div>`;
 const _LIB_UNAVAILABLE_HTML = `<div class="empty-state" style="grid-column:1/-1">لا تتوفر بيانات محفوظة بدون اتصال</div>`;
 
@@ -390,6 +396,36 @@ function _libApplyData() {
   // Also keep legacy lecturesList empty (hidden)
   const legacy = document.getElementById("lecturesList");
   if (legacy) legacy.innerHTML = "";
+  _libRenderLoadMore();
+}
+
+// زرار "عرض المزيد" — يظهر آخر الشبكة فقط لما تكون الصفحة ممتلئة (في محاضرات أقدم محتملة)
+function _libRenderLoadMore() {
+  const grid = document.getElementById("libSubjectGrid");
+  if (!grid) return;
+  let btn = document.getElementById("libLoadMoreBtn");
+  if (!_libMayHaveMore) { btn?.remove(); return; }
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "libLoadMoreBtn";
+    btn.type = "button";
+    btn.style.cssText = "grid-column:1/-1;margin:8px auto 2px;display:block;padding:10px 22px;border-radius:12px;border:1px solid rgba(0,0,0,.10);background:var(--card,#fff);color:var(--text,#222);font-weight:700;cursor:pointer;font-family:inherit;font-size:14px;";
+    btn.addEventListener("click", _libLoadMore);
+  }
+  btn.disabled = _libLoadingMore;
+  btn.textContent = _libLoadingMore ? "جارٍ التحميل…" : "عرض المزيد من المحاضرات";
+  grid.appendChild(btn);
+}
+
+// يوسّع حد المستمع بصفحة إضافية ويعيد إنشاءه — المستندات المحمّلة تأتي من الكاش (بلا قراءات مكررة) والجديدة فقط تُقرأ
+function _libLoadMore() {
+  if (!_libLiveCtx || _libLoadingMore) return;
+  _libLoadingMore = true;
+  _libLiveLimit += _LIB_PAGE;
+  _libRenderLoadMore();
+  const ctx = _libLiveCtx;
+  _libLiveStop();
+  _libLiveStart(ctx);
 }
 
 function _libLiveStop() {
@@ -411,6 +447,7 @@ function _libLiveStart(ctx) {
   if (_libDataSig !== ctx.sig) {
     // حساب/عالم مختلف عن بيانات المكتبة الحالية → ابدأ نظيف (مفيش بيانات الحساب/العالم السابق)
     _libAllDocs = []; _libCurSubject = null; _libRendered = false;
+    _libLiveLimit = _LIB_PAGE; _libMayHaveMore = false; _libLoadingMore = false;
     if (detail) detail.style.display = "none";
     if (fav)    fav.style.display    = "none";
     if (grid)   { grid.style.display = ""; grid.innerHTML = _LIB_SPINNER_HTML; }
@@ -425,13 +462,16 @@ function _libLiveStart(ctx) {
   let first = true;
   try {
     // ✅ World Isolation: نفس الاستعلام القديم بالظبط (worldId + createdAt تنازلي) + فلترة worldId على العميل
-    const q = query(collection(window.db, "lectures"), where("worldId", "==", ctx.world), orderBy("createdAt", "desc"));
+    const q = query(collection(window.db, "lectures"), where("worldId", "==", ctx.world), orderBy("createdAt", "desc"), limit(_libLiveLimit));
     _libLiveUnsub = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
       if (gen !== _libLiveGen || window.currentUser?.uid !== ctx.uid) return;
       const fromCache = snap.metadata.fromCache;
       const _srcDocs = snap.docs.filter(d => d.data().worldId === ctx.world);
       // لقطة مؤكدة من السيرفر (من غير كتابات معلّقة) → سجّل العلامة بعدد العناصر
-      if (!fromCache && !snap.metadata.hasPendingWrites) _libSetMarker(mk, _srcDocs.length);
+      if (!fromCache && !snap.metadata.hasPendingWrites) {
+        _libSetMarker(mk, _srcDocs.length);
+        _libMayHaveMore = snap.docs.length >= _libLiveLimit;   // صفحة ممتلئة = غالبًا في أقدم
+      }
       if (fromCache && !_libCacheTrusted(_libGetMarker(mk), _srcDocs.length)) {
         // كاش غير موثوق (من غير علامة، أو أقل من آخر تأكيد، أو فاضي مع علامة قديمة) → مش بنعرضه كقائمة كاملة ولا كـ "لا توجد محاضرات"
         if (navigator.onLine === false && !_libRendered && grid) grid.innerHTML = _LIB_UNAVAILABLE_HTML;
@@ -443,6 +483,7 @@ function _libLiveStart(ctx) {
       _srcDocs.forEach(d => _newDocs.push({ _id: d.id, ...d.data() }));
       try {
         _libAllDocs = _newDocs;
+        _libLoadingMore = false;
         _libApplyData();
       } catch (err) {
         // فشل العرض → رسالة خطأ بدل عرض جزئي مضلّل؛ المستمع بيفضل شغّال وبيحاول مع اللقطة الجاية
