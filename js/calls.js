@@ -470,6 +470,7 @@
       timerId = setInterval(tick, 1000); tick(); renderParts(); refreshBtn();
     } catch (e) {
       if (!e || e.message !== "user-changed") toast(errText(e));
+      if (callCtx && callCtx.callId) bchRec("fail", { callId: callCtx.callId });
       await end(true);
     }
   }
