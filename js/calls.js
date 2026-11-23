@@ -242,6 +242,15 @@
     });
   }
 
+  function incomingRecord(d) {
+    if (!d || !window.BisCallHistory || !d.ts || typeof d.ts.toMillis !== "function") return Promise.resolve(null);
+    if (!d._recordPromise) d._recordPromise = Promise.race([
+      window.BisCallHistory.resolveIncoming(d.callerUid, new Date(d.ts.toMillis()).toISOString()),
+      new Promise(function (r) { setTimeout(function () { r(null); }, 1500); })
+    ]).then(function (rec) { if (rec) d.callId = rec.id; return rec; });
+    return d._recordPromise;
+  }
+
   function onIncoming(snap) {
     try {
       inboxErrStreak = 0; /* بث سليم ⇒ تصفير التراجع */
@@ -252,9 +261,10 @@
         if (!fresh) return;
         if (active || starting || callCtx) { /* مشغول ⇒ رفض تلقائي */
           fs().then(function (F) { return F.updateDoc(F.doc(window.db, "activeCalls", inboxUid), { state: "declined", reason: "busy" }); }).catch(function () {});
-          bchRec("decline", { callId: d.callId, reason: "busy" });
+          incomingRecord(d).then(function (rec) { if (rec) bchRec("decline", { callId: rec.id, reason: "busy" }); });
           return;
         }
+        incomingRecord(d);
         showIncoming(d);
       } else { hideIncoming(); }
     } catch (e) {}
@@ -292,6 +302,7 @@
   async function acceptIncoming() {
     var d = incomingData; if (!d) return;
     hideIncoming();
+    await incomingRecord(d);
     try {
       var F = await fs();
       var ref = F.doc(window.db, "activeCalls", inboxUid);
@@ -305,6 +316,7 @@
   async function declineIncoming() {
     var d = incomingData; hideIncoming();
     if (!d) return;
+    await incomingRecord(d);
     try { var F = await fs(); await F.updateDoc(F.doc(window.db, "activeCalls", inboxUid), { state: "declined" }); bchRec("decline", { callId: d.callId }); } catch (e) {}
   }
 
@@ -347,7 +359,7 @@
       ]);
     } catch (e) {}
     callCtx.callId = callId;
-    await F.setDoc(ref, { callerUid: callUid, callerName: myName(), calleeUid: target.peerUid, state: "ringing", ts: F.serverTimestamp(), callId: callId, callType: (opts && opts.video) ? "video" : "audio" });
+    await F.setDoc(ref, { callerUid: callUid, callerName: myName(), calleeUid: target.peerUid, state: "ringing", ts: F.serverTimestamp() });
     sigUnsub = F.onSnapshot(ref, onSignal, function () {});
     ringTimer = setTimeout(function () { finishSignal("لا يوجد رد", true); }, 45000);
     /* إشعار خارجي بالمسار الحالي (احتياطي لو الطرف التاني مش فاتح التطبيق) */
