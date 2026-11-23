@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const root=path.join(__dirname,'..');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-const main=fs.readFileSync(path.join(root,'js/app-main.js'),'utf8');
+const app=require('./_app-source.cjs');const main=app.source;
 const sw=fs.readFileSync(path.join(root,'firebase-messaging-sw.js'),'utf8');
 const strip=u=>u.split('?')[0].split('#')[0];
 
@@ -33,8 +33,39 @@ test('importmap is still the first script that can load modules',()=>{
  assert.ok(html.indexOf('type="importmap"')<html.indexOf('type="module"'));
  assert.ok(html.indexOf('type="importmap"')<html.indexOf('rel="modulepreload"'));
 });
-test('app-main relative imports resolve',()=>{
- for(const m of main.matchAll(/from\s+"(\.[^"]+)"/g))assert.ok(fs.existsSync(path.join(root,'js',strip(m[1]))),m[1]);
+test('app-main and app modules: relative imports resolve',()=>{
+ for(const [f,src] of Object.entries(app.parts))for(const m of src.matchAll(/from\s+"(\.[^"]+)"/g))assert.ok(fs.existsSync(path.join(root,path.dirname(f),strip(m[1]))),f+' -> '+m[1]);
+ assert.ok(app.mods.length>=20);
+});
+test('every name a module imports from a sibling is exported by it',()=>{
+ for(const [f,src] of Object.entries(app.parts))for(const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s+"\.\/([^"]+)"/g)){
+  const target=app.parts['js/app/'+m[2]];assert.ok(target,f+' -> '+m[2]);
+  const ex=new Set();for(const e of target.matchAll(/export\s*\{([^}]*)\}/g))e[1].split(',').forEach(x=>ex.add(x.trim()));
+  for(const e of target.matchAll(/export\s+(?:async\s+)?function\s+([\w$]+)/g))ex.add(e[1]);
+  for(const n of m[1].split(',').map(x=>x.trim()).filter(Boolean))assert.ok(ex.has(n),f+' imports '+n+' not exported by '+m[2]);
+ }
+});
+test('every use of confirm( in app modules imports the local confirm (it shadows window.confirm)',()=>{
+ for(const [f,src] of Object.entries(app.parts)){
+  if(f==='js/app-main.js')continue;
+  const code=src.replace(/\/\*[\s\S]*?\*\//g,'').replace(/(^|[^:])\/\/.*$/gm,'$1');
+  const uses=/(?<![\w$.])confirm\s*\(/.test(code);
+  const defines=/function\s+confirm\s*\(/.test(code);
+  const imports=/import\s*\{[^}]*\bconfirm\b[^}]*\}\s*from\s+"\.\/e-toast-confirm\.js"/.test(src);
+  if(uses&&!defines)assert.ok(imports,f+' uses confirm( without importing it');
+ }
+});
+test('the 12 non-exported names are each defined once in a module',()=>{
+ for(const n of ['AUDIT_ACTIONS','_buildUploadCard','_draftClear','_draftRestore','_draftSave','_femaleSVG','_maleSVG','_formatSize','_getFileCategory','_getUser','writeAuditLog','uploadToCloudinaryWithProgress','storage']){
+  const defs=Object.entries(app.parts).filter(([f,s])=>new RegExp('(?:^|\\n)\\s*(?:export\\s+)?(?:async\\s+)?(?:function\\s+'+n+'\\b|(?:const|let|var)\\s+'+n+'\\b)').test(s));
+  assert.equal(defs.length,1,n+' defined in '+defs.map(d=>d[0]).join(','));
+ }
+});
+test('no module assigns to an imported binding (state writes go through __set_/__inc_ helpers)',()=>{
+ for(const [f,src] of Object.entries(app.parts)){
+  const imported=new Set();for(const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s+"\.\/[^"]+"/g))m[1].split(',').forEach(x=>imported.add(x.trim()));
+  for(const n of imported){if(!n||n.startsWith('__'))continue;assert.ok(!new RegExp('(?<![\\w$.])'+n.replace(/\$/g,'\\$')+'\\s*(?:=(?!=)|\\+=|-=|\\+\\+|--)').test(src.replace(/import[^;]*;/g,'')),f+' assigns imported '+n);}
+ }
 });
 test('every inline handler function is defined somewhere',()=>{
  const names=new Set();
