@@ -297,7 +297,7 @@ window.ensurePrivateChatDoc = ensurePrivateChatDoc;
       }, 2));
 
       try {
-        window.BariqProfanity.payload(msgData, _currentChatId);
+        window.BariqProfanity.payload(msgData, isPrivate ? null : 'public');
         await addDoc(collection(db, colPath), msgData);
       } catch(addErr) {
         console.error("[VoiceRec] ✖ فشل addDoc:");
