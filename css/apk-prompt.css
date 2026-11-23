@@ -79,9 +79,14 @@
   pointer-events: none;
   opacity: 0;
   transform: scale(.7);
-  transition: opacity .25s ease, transform .25s ease;
+  transition: opacity .25s ease, transform .25s ease, bottom .25s ease;
 }
 .apk-mini.show{ opacity: .92; transform: scale(1); pointer-events: auto; cursor: pointer; }
+
+/* صندوق الرد مفتوح: نرفع البطة فوقه تمامًا عشان متغطّيهش أبدًا (84 + 8 هامش + ~54 ارتفاع الصندوق + هامش أمان) */
+body:has(#replyBar.show) .apk-mini{
+  bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+}
 
 /* نافذة "تم تحميل التطبيق" — لا تحجب الموقع (بدون طبقة خلفية) */
 .apk-done{
