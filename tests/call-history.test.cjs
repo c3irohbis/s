@@ -165,7 +165,8 @@ test('integration hooks: calls.js records before signaling; chat-listener merges
   const iRing=calls.indexOf('BisCallHistory.record("ring"');
   const iSet=calls.indexOf('setDoc(ref, { callerUid: callUid');
   assert.ok(iRing>0&&iSet>iRing,'ring record before setDoc (record-before-signaling)');
-  assert.ok(calls.includes('callId: callId, callType:'),'callId+callType carried in the signaling doc');
+  assert.ok(!calls.includes('callId: callId, callType:'),'legacy signal must not contain forbidden new fields');
+  assert.ok(calls.includes('await incomingRecord(d)'), 'callee resolves record before updating its state');
   for(const h of ['bchRec("accept"','bchRec("decline"','bchRec("cancel"','bchRec("end"','bchSync(callCtx.callId)'])
     assert.ok(calls.includes(h),'hook present: '+h);
   assert.ok(calls.indexOf('newCallId()')<calls.indexOf('async function startDm')===false||true);
