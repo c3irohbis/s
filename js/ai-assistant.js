@@ -1,264 +1,98 @@
-/* ══════════════════════════════════════════════════════════════
-   ai-assistant.js — منطق المساعد الذكي الكامل
-   يعتمد على js/ai-config.js (لازم يُحمَّل قبل الملف ده).
-   شاشة العرض (#page-ai-chat) بتستخدم نفس كلاسات شاشة الشات الحقيقية
-   (.msg-row, .bubble, .bubble-meta...) بدون أي تعديل عليها.
-══════════════════════════════════════════════════════════════ */
-
-// ── حالة القائمة (للعرض في dmsConvList فقط، لا يوجد أي تخزين Firestore) ──
-let _aiLastMsg  = "اسأل أي سؤال عن الموقع...";
-let _aiLastTime = null;
-let _aiUnread   = 0;
-let _aiMessages = []; // {who:'in'|'out', text, ts}
-
-window._aiListItem = function () {
-  return {
-    id: "ai", name: "المساعد الذكي", photo: "", cls: "ai",
-    lastMsg: _aiLastMsg, lastTime: _aiLastTime, unread: _aiUnread,
+/* Bariq v1: local guide. No API calls, database reads, or account mutations. */
+(function () {
+  'use strict';
+  const kb = window.BariqKnowledge;
+  if (!kb) return;
+  const byId = Object.fromEntries(kb.topics.map(t => [t.id,t]));
+  let messages = [], sending = false, lastTopic = null;
+  const escape = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const norm = s => String(s || '').toLowerCase().normalize('NFKC').replace(/[أإآٱ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/[\u064B-\u065F\u0670ـ]/g,'').replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim().split(' ').map(w=>w.startsWith('ال')&&w.length>3?w.slice(2):w).join(' ');
+  const stop = new Set(['عايز','عاوز','ازاي','كيف','انا','هو','هي','ايه','فين','من','في','علي','الي','عن','لي','يا','لو','عندي','ممكن','اعمل','عايزه','عاوزه','اقدر','بتاع','بتاعه','دا','ده','دي']);
+  function match(text) {
+    const q=norm(text), words=q.split(' ').filter(w=>w.length>1&&!stop.has(w));
+    if(!q) return [];
+    const ranked=kb.topics.map(t=>{
+      let best=0;
+      [t.title,...t.phrases].forEach(p=>{
+        const n=norm(p), tokens=n.split(' ');
+        if(q===n) best=Math.max(best,100+n.length);
+        else if((' '+q+' ').includes(' '+n+' ')) best=Math.max(best,30+n.length*2);
+        else {
+          const hits=tokens.filter(w=>!stop.has(w)&&words.includes(w));
+          if(hits.length) best=Math.max(best, hits.length/tokens.length*12+hits.length*2);
+        }
+      });
+      if(t.parent===lastTopic&&best) best+=2;
+      return {id:t.id,score:best};
+    }).filter(t=>t.score>=10).sort((a,b)=>b.score-a.score);
+    if(!ranked.length) return [];
+    if(ranked[0].score>=30 && (!ranked[1]||ranked[0].score-ranked[1].score>=5)) return [ranked[0].id];
+    return ranked.filter(t=>ranked[0].score-t.score<=5).slice(0,4).map(t=>t.id);
+  }
+  const actions = {};
+  function home(tab) { window.showPage?.('page-home'); window.goTab?.(tab || 'tab-forum'); }
+  actions.forum=()=>home();
+  ['news','lectures','exams','sections','attendance','whyhere'].forEach(k=>{
+    actions[k==='whyhere'?'why':k]=()=>{ home(); window.openForumSection?.('tab-'+k,'tab-'+k+'-content'); };
+  });
+  const modules={schedule:'StudyScheduleModule',sheetaty:'SheetatyModule',mydocs:'MyDocsModule',expenses:'MyExpensesHub',tuition:'TuitionModule',budget:'ExpensesModule',grades:'GradesModule',lost:'LostFoundModule',military:'MilitaryModule',instructions:'InstructionsModule'};
+  Object.entries(modules).forEach(([id,name])=>{actions[id]=()=>{if(typeof window[name]?.open!=='function') throw Error('unavailable'); home(); window[name].open();};});
+  actions.settings=()=>{window.openSettingsModal?.(); window.switchSettingsTab?.(null);};
+  const tabs={appearance:'appearance',notifications:'notifications',privacy:'privacy',account:'account',password:'account',chatsettings:'chat'};
+  Object.entries(tabs).forEach(([id,tab])=>{actions[id]=()=>{
+    if(typeof window.openSettingsModal!=='function') throw Error('unavailable');
+    window.openSettingsModal(); window.switchSettingsTab?.(tab);
+    if(id==='password') requestAnimationFrame(()=>document.getElementById('currentPassword')?.scrollIntoView({block:'center',behavior:'smooth'}));
+  };});
+  actions.profile=()=>home('tab-profile');
+  actions.photo=()=>{home('tab-profile');window.openPhotoUploadDirect?.();};
+  actions.editprofile=()=>{home('tab-profile');window.openEditDataDirect?.();};
+  actions.dms=()=>window.showPage?.('page-dms');
+  actions.publicchat=()=>window.openChatPage?.();
+  actions.portal=()=>window.openPortal?.();
+  actions.install=()=>{home();window.installPWAFromCard?.();};
+  const labels={password:'افتح مكان تغيير كلمة السر',photo:'افتح تعيين الصورة',editprofile:'افتح تعديل البيانات',settings:'افتح الإعدادات',profile:'افتح بروفايلي',publicchat:'افتح الشات العام',dms:'افتح الدردشات',portal:'افتح البوابة الخارجية',install:'افتح خيارات التثبيت',tuition:'افتح مصروفات السنة',budget:'افتح فلوسي ومواصلاتي'};
+  function chip(id) { return `<button type="button" class="bariq-chip" data-bariq-topic="${escape(id)}">${escape(byId[id].title)}<span aria-hidden="true">‹</span></button>`; }
+  function topicHtml(t) {
+    const children=kb.topics.filter(x=>x.parent===t.id);
+    return `<h3 class="bariq-topic-title">${escape(t.title)}</h3>`+t.sections.map(s=>`<section class="bariq-section"><h4>${escape(s.title)}</h4><p>${escape(s.text)}</p></section>`).join('')+
+      (children.length?`<div class="bariq-follow-title">تحب تعرف إيه كمان؟</div><div class="bariq-options">${children.map(c=>chip(c.id)).join('')}</div>`:'')+
+      (t.action?`<button type="button" class="bariq-action" data-bariq-action="${escape(t.action)}">${escape(labels[t.action]||'افتح '+t.title)} <span aria-hidden="true">↗</span></button><p class="bariq-action-note">الزر بيفتح القسم الأصلي، وممكن يبدأ تحميل محتواه المعتاد. مش بيحفظ أو يرسل حاجة.</p>`:'')+
+      `<div class="bariq-topic-nav">${t.parent?`<button type="button" data-bariq-topic="${escape(t.parent)}">رجوع لـ ${escape(byId[t.parent].title)}</button>`:''}<button type="button" data-bariq-root>كل الأسئلة الشائعة</button></div>`;
+  }
+  function render() {
+    const body=document.getElementById('aiChatBody'); if(!body) return;
+    body.innerHTML=`<div class="bariq-hero"><img src="images/mascot/ui/ai-bariq.webp" alt="بريق" width="76" height="76"><div><strong>بريق معاك</strong><span>دليلك للموقع، خطوة بخطوة</span></div></div>`+messages.map(m=>`<div class="msg-row ${m.out?'me':'other'}"><div class="msg-bubble-group"><div class="msg-line"><div class="bubble ${m.out?'me':'other'}"><div class="bubble-text">${m.topic?topicHtml(byId[m.topic]):escape(m.text)}${m.choices?`<div class="bariq-options">${m.choices.map(chip).join('')}</div>`:''}</div></div></div><div class="bubble-meta ${m.out?'':'other'}"><span class="bubble-time">${new Date(m.ts).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'})}</span></div></div></div>`).join('');
+    const rows=body.querySelectorAll('.msg-row');
+    if(rows.length>1) rows[rows.length-1].scrollIntoView({block:'start',behavior:'smooth'});
+    else body.scrollTop=0;
+  }
+  function push(m) {messages.push({...m,ts:Date.now()}); if(messages.length>40) messages=messages.slice(-40);render();}
+  function root() {lastTopic=null;push({text:kb.greeting,choices:kb.roots});}
+  function choose(id) {if(!byId[id])return;lastTopic=id;push({out:true,text:byId[id].title});push({topic:id});}
+  window._aiListItem=()=>({id:'ai',name:'بريق',photo:'',cls:'ai',lastMsg:'دليلك للموقع • شرح وخطوات واختصارات',lastTime:null,unread:0});
+  window._openAiChat=()=>{window.showPage?.('page-ai-chat');if(!messages.length) root();else render();};
+  window._sendToAI=()=>{
+    if(sending)return;
+    const input=document.getElementById('aiChatInput'),text=(input?.value||'').trim();if(!text)return;
+    if(text.length>500){window.toast?.('خلي السؤال أقل من ٥٠٠ حرف عشان أوصّلك بسرعة','warn');return;}
+    sending=true;input.value='';push({out:true,text});
+    const ids=match(text);
+    if(ids.length===1){lastTopic=ids[0];push({topic:ids[0]});}
+    else if(ids.length>1)push({text:'تقصد أنهي موضوع من دول يا صاحبي؟',choices:ids});
+    else push({text:'مش متأكد من قصدك، ومش هفتي عليك 😄 أنا متخصص في شرح الموقع. اختار موضوع، أو اكتب اسم الكارت والحاجة اللي محتاجها.',choices:kb.roots});
+    sending=false;
   };
-};
-
-// ── فتح شاشة المساعد ──
-window._openAiChat = function () {
-  _aiUnread = 0;
-  window.showPage?.("page-ai-chat");
-  if (!_aiMessages.length) {
-    _aiMessages.push({ who: "in", text: "أهلاً بيك! أنا المساعد الذكي، اسألني في أي حاجة.", ts: Date.now() });
-  }
-  _renderAiMessages();
-  window._dmsRerender?.();
-  setTimeout(() => { document.getElementById("aiChatInput")?.focus(); }, 200);
-};
-
-// ── رسم الرسائل بنفس تصميم فقاعة الشات الحقيقية (msg-row/bubble) ──
-function _renderAiMessages() {
-  const body = document.getElementById("aiChatBody");
-  if (!body) return;
-  if (!_aiMessages.length) {
-    body.innerHTML = `<div class="empty-state" style="margin:auto;">اسأل المساعد الذكي عن أي حاجة في الموقع <i class="fa-solid fa-sparkles"></i></div>`;
-    return;
-  }
-  const dayDivider = `<div class="date-divider"><span>اليوم</span></div>`;
-  const mascotHero = `<div style="display:flex;justify-content:center;padding:24px 0 8px;"><img src="images/mascot/actions/sleep.webp" alt="بريق" style="width:220px;max-width:70%;height:auto;"></div>`;
-  body.innerHTML = mascotHero + dayDivider + _aiMessages.map(m => {
-    const isMe = m.who === "out";
-    const timeStr = new Date(m.ts).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
-    return `
-      <div class="msg-row ${isMe ? "me" : "other"}">
-        <div class="msg-bubble-group">
-          <div class="msg-line">
-            <div class="bubble ${isMe ? "me" : "other"}">
-              <div class="bubble-text">${_escAi(m.text)}</div>
-            </div>
-          </div>
-          <div class="bubble-meta ${isMe ? "" : "other"}">
-            <span class="bubble-time">${timeStr}</span>
-          </div>
-        </div>
-      </div>`;
-  }).join("");
-  body.scrollTop = body.scrollHeight;
-}
-
-function _escAi(s) {
-  const d = document.createElement("div");
-  d.textContent = s || "";
-  return d.innerHTML;
-}
-
-function _showAiTyping() {
-  const body = document.getElementById("aiChatBody");
-  if (!body) return;
-  const row = document.createElement("div");
-  row.className = "msg-row other";
-  row.id = "aiTypingRow";
-  row.innerHTML = `<div class="msg-bubble-group"><div class="msg-line"><div class="bubble other"><div class="ai-typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div></div></div>`;
-  body.appendChild(row);
-  body.scrollTop = body.scrollHeight;
-}
-function _hideAiTyping() {
-  document.getElementById("aiTypingRow")?.remove();
-}
-
-// ══ Rate Limiter + معالجة الأخطاء (منقول بنفس المنطق المُرسَل) ══
-const AI_COOLDOWN_KEY  = "bliss_ai_cooldown_until";
-const AI_RATE_LOG_KEY  = "bliss_ai_request_log";
-let aiCooldownUntil = parseInt(localStorage.getItem(AI_COOLDOWN_KEY) || "0", 10) || 0;
-let aiCooldownTimer = null;
-let aiSending = false;
-
-function setAiSendDisabled(disabled) {
-  const btn = document.getElementById("aiSendBtn");
-  if (!btn) return;
-  btn.style.opacity = disabled ? "0.5" : "";
-  btn.style.pointerEvents = disabled ? "none" : "";
-}
-
-function startAiCooldown(seconds) {
-  aiCooldownUntil = Date.now() + seconds * 1000;
-  localStorage.setItem(AI_COOLDOWN_KEY, String(aiCooldownUntil));
-  setAiSendDisabled(true);
-  if (aiCooldownTimer) clearTimeout(aiCooldownTimer);
-  const tick = () => {
-    const remaining = Math.ceil((aiCooldownUntil - Date.now()) / 1000);
-    const inp = document.getElementById("aiChatInput");
-    if (remaining <= 0) {
-      setAiSendDisabled(false);
-      if (inp) inp.placeholder = "اسأل المساعد الذكي...";
-      aiCooldownTimer = null;
-      localStorage.removeItem(AI_COOLDOWN_KEY);
-      return;
-    }
-    if (inp) inp.placeholder = `المساعد مشغول، جرب بعد ${remaining} ثانية...`;
-    aiCooldownTimer = setTimeout(tick, 1000);
-  };
-  tick();
-}
-if (aiCooldownUntil > Date.now()) {
-  startAiCooldown(Math.ceil((aiCooldownUntil - Date.now()) / 1000));
-}
-
-function getRequestLog() {
-  try {
-    const cfg = window._aiConfig;
-    const log = JSON.parse(localStorage.getItem(AI_RATE_LOG_KEY) || "[]");
-    return log.filter(ts => ts > Date.now() - cfg.rateWindowMs);
-  } catch { return []; }
-}
-function recordRequest() {
-  const log = getRequestLog();
-  log.push(Date.now());
-  localStorage.setItem(AI_RATE_LOG_KEY, JSON.stringify(log));
-}
-function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
-
-async function waitForRateLimitSlot() {
-  const cfg = window._aiConfig;
-  let log = getRequestLog();
-  while (log.length >= cfg.rateSafeLimit) {
-    const waitMs = Math.max(0, (log[0] + cfg.rateWindowMs) - Date.now()) + 250;
-    const inp = document.getElementById("aiChatInput");
-    if (inp) inp.placeholder = `طلبك في قائمة الانتظار، هيتبعت تلقائي بعد ${Math.ceil(waitMs / 1000)} ثانية...`;
-    await delay(Math.min(waitMs, 1000));
-    log = getRequestLog();
-  }
-  const inp = document.getElementById("aiChatInput");
-  if (inp) inp.placeholder = "اسأل المساعد الذكي...";
-}
-
-async function askGemini(promptText) {
-  const cfg = window._aiConfig;
-  let response;
-  try {
-    response = await fetch(cfg.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: cfg.systemInstruction }] },
-        contents: [{ parts: [{ text: promptText }] }],
-      }),
-    });
-  } catch (networkErr) {
-    throw new Error("تعذّر الوصول للشبكة: " + (networkErr?.message || networkErr));
-  }
-  const rawText = await response.text();
-  let data;
-  try { data = JSON.parse(rawText); }
-  catch { throw new Error(`رد غير متوقع (status ${response.status}): ` + rawText.slice(0, 200)); }
-  if (!response.ok) {
-    throw new Error(`Gemini API error (status ${response.status}): ${data?.error?.message || JSON.stringify(data)}`);
-  }
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("رد غير متوقع من Gemini: " + JSON.stringify(data).slice(0, 300));
-  return text;
-}
-
-async function askGeminiWithRetry(text) {
-  await waitForRateLimitSlot();
-  try {
-    recordRequest();
-    return await askGemini(text);
-  } catch (err) {
-    if (err?.message?.includes("status 503")) {
-      await delay(3000);
-      recordRequest();
-      return await askGemini(text);
-    }
-    throw err;
-  }
-}
-
-// تنبيه: المساعد الذكي متوقف مؤقتًا — أي رسالة تظهر لها رسالة "تحت التطوير".
-// لإعادة التفعيل: غيّر القيمة التالية إلى false.
-const AI_TEMP_DISABLED = true;
-
-// ══ الإرسال ══
-window._sendToAI = function () {
-  if (aiSending) return;
-  if (Date.now() < aiCooldownUntil) return;
-  const inp = document.getElementById("aiChatInput");
-  const text = (inp?.value || "").trim();
-  if (!text) return;
-
-  aiSending = true;
-  setAiSendDisabled(true);
-
-  _aiMessages.push({ who: "out", text, ts: Date.now() });
-  _aiLastMsg = text; _aiLastTime = { toMillis: () => Date.now() };
-  _renderAiMessages();
-  window._dmsRerender?.();
-  if (inp) inp.value = "";
-
-  // المساعد موقوف لحد ما يتحط مفتاح API حقيقي في js/ai-config.js
-  if (AI_TEMP_DISABLED || !window._aiConfig?.isConfigured) {
-    setTimeout(() => {
-      const reply = "هاي، معاك بريق. حاليًا المساعد الذكي تحت التطوير.";
-      _aiMessages.push({ who: "in", text: reply, ts: Date.now() });
-      _aiLastMsg = reply; _aiLastTime = { toMillis: () => Date.now() };
-      _renderAiMessages();
-      window._dmsRerender?.();
-      aiSending = false;
-      setAiSendDisabled(false);
-    }, 400);
-    return;
-  }
-
-  setTimeout(() => { _showAiTyping(); }, 300);
-  setTimeout(async () => {
-    try {
-      const reply = await askGeminiWithRetry(text);
-      _hideAiTyping();
-      _aiMessages.push({ who: "in", text: reply, ts: Date.now() });
-      _aiLastMsg = reply; _aiLastTime = { toMillis: () => Date.now() };
-      _renderAiMessages();
-    } catch (err) {
-      _hideAiTyping();
-      const msg = err?.message || "";
-      console.error("Gemini error:", msg || err);
-      let errText;
-      if (msg.includes("status 429")) {
-        const match = msg.match(/retry in ([\d.]+)s/i);
-        const waitSec = match ? Math.ceil(parseFloat(match[1])) : 30;
-        errText = `⏳ المساعد وصل للحد المسموح به من الطلبات دلوقتي، جرب تاني بعد ${waitSec} ثانية.`;
-        startAiCooldown(waitSec);
-      } else if (msg.includes("status 503")) {
-        errText = "⚠️ في ضغط عالي على المساعد الذكي دلوقتي، جرب تاني بعد شوية.";
-      } else {
-        errText = "هاي، معاك بريق. حاليًا المساعد الذكي تحت التطوير.";
-      }
-      _aiMessages.push({ who: "in", text: errText, ts: Date.now() });
-      _aiLastMsg = errText; _aiLastTime = { toMillis: () => Date.now() };
-      _renderAiMessages();
-    } finally {
-      aiSending = false;
-      window._dmsRerender?.();
-      if (Date.now() >= aiCooldownUntil) setAiSendDisabled(false);
-    }
-  }, 700);
-};
-
-// ── ربط زر الإرسال + Enter ──
-document.addEventListener("DOMContentLoaded", () => {
-  const inp = document.getElementById("aiChatInput");
-  inp?.addEventListener("keydown", e => { if (e.key === "Enter") window._sendToAI(); });
-});
+  document.addEventListener('click',e=>{
+    const btn=e.target.closest('[data-bariq-topic],[data-bariq-action],[data-bariq-root]');if(!btn)return;
+    if(btn.hasAttribute('data-bariq-root'))root();
+    else if(btn.dataset.bariqTopic)choose(btn.dataset.bariqTopic);
+    else {try{const run=actions[btn.dataset.bariqAction];if(!run)throw Error('unavailable');run();}catch(_){push({text:'الاختصار مش متاح دلوقتي. افتح القسم من القائمة الأصلية، وأنا أقدر أشرح لك الطريق.'});}}
+  });
+  document.addEventListener('DOMContentLoaded',()=>{
+    document.getElementById('aiChatInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();window._sendToAI();}});
+    document.getElementById('aiChatInput')?.setAttribute('maxlength','500');
+  });
+  // Read-only diagnostics for dev tests, no personal content.
+  window.BariqGuide = Object.freeze({match,normalize:norm,topicCount:kb.topics.length,actionIds:Object.keys(actions)});
+})();
