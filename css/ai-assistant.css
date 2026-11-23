@@ -49,3 +49,16 @@
 #page-ai-chat .bariq-action-note{font-size:9px}
 .bariq-topic-nav{margin-top:9px;padding-top:5px}
 #page-ai-chat .bariq-topic-nav button{font-size:10px;min-height:30px}
+/* Native neutral chat treatment. */
+#page-ai-chat .bariq-topic-title,.bariq-hero strong,.bariq-section h4,.bariq-chip span{color:inherit}
+#page-ai-chat .bariq-section h4{opacity:.65;font-weight:500}
+.bariq-hero strong{font-weight:600}
+.bariq-options{background:transparent;border-radius:0}
+#page-ai-chat button.bariq-chip{border-bottom:1px solid rgba(145,145,145,.15);font-weight:400;background:transparent}
+#page-ai-chat .bariq-chip span{opacity:.4}
+#page-ai-chat button.bariq-action{background:rgba(145,145,145,.12);color:inherit;border:1px solid rgba(145,145,145,.25);font-weight:500;border-radius:8px;box-shadow:none}
+#page-ai-chat .bariq-topic-nav button{color:inherit;opacity:.65;text-decoration:none}
+#page-ai-chat .msg-row.other .bubble{border-color:rgba(145,145,145,.14);box-shadow:none}
+#page-ai-chat .bariq-topic-title{font-weight:600}
+#page-ai-chat .bariq-section p{font-weight:400}
+#page-ai-chat .bubble-text{font-weight:400}
