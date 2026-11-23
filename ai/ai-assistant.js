@@ -111,7 +111,7 @@
     const ids=match(text);
     if(ids.length===1){lastTopic=ids[0];push({topic:ids[0]});}
     else if(ids.length>1)push({text:'تقصد أنهي موضوع من دول يا صاحبي؟',choices:ids});
-    else push({text:'مش متأكد من قصدك، ومش هفتي عليك 😄 أنا متخصص في شرح الموقع. اختار موضوع، أو اكتب اسم الكارت والحاجة اللي محتاجها.',choices:kb.roots});
+    else push({text:'مش فاهمك يا صاحبي',choices:kb.roots});
     sending=false;
   };
   document.addEventListener('click',e=>{
