@@ -25,3 +25,6 @@ create index if not exists call_records_updated_idx on public.call_records (upda
 -- RLS مفعَّل بصفر سياسات: رفض كامل للوصول المباشر (anon/auth)؛ الوصول الوحيد عبر service_role في العامل
 alter table public.call_records enable row level security;
 revoke all on public.call_records from anon, authenticated;
+
+-- Server worker role: only the operations used by this table.
+grant select, insert, update on public.call_records to service_role;
