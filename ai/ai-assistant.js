@@ -11,25 +11,27 @@
   const escape = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const norm = s => String(s || '').toLowerCase().normalize('NFKC').replace(/[أإآٱ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/[\u064B-\u065F\u0670ـ]/g,'').replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim().split(' ').map(w=>w.startsWith('ال')&&w.length>3?w.slice(2):w).join(' ');
   const stop = new Set(['عايز','عاوز','ازاي','كيف','انا','هو','هي','ايه','فين','من','في','علي','الي','عن','لي','يا','لو','عندي','ممكن','اعمل','عايزه','عاوزه','اقدر','بتاع','بتاعه','دا','ده','دي']);
+  const compiled=kb.topics.map(t=>({id:t.id,parent:t.parent,phrases:Array.from(new Set([t.title,...t.phrases].map(norm))).map(n=>({n,tokens:n.split(' ')}))}));
+  const exact=new Map();
+  compiled.forEach(t=>t.phrases.forEach(p=>{if(!exact.has(p.n))exact.set(p.n,[]);if(!exact.get(p.n).includes(t.id))exact.get(p.n).push(t.id);}));
+  // Topic titles are explicit choices, prefer them over a broad alias from another topic.
+  kb.topics.forEach(t=>exact.set(norm(t.title),[t.id]));
   function match(text) {
-    const q=norm(text), words=q.split(' ').filter(w=>w.length>1&&!stop.has(w));
-    if(!q) return [];
-    const ranked=kb.topics.map(t=>{
+    const q=norm(text),words=q.split(' ').filter(w=>w.length>1&&!stop.has(w));
+    if(!q)return [];
+    if(exact.has(q))return exact.get(q).slice(0,4);
+    const ranked=compiled.map(t=>{
+      if(t.id==='angry')return {id:t.id,score:0};
       let best=0;
-      [t.title,...t.phrases].forEach(p=>{
-        const n=norm(p), tokens=n.split(' ');
-        if(q===n) best=Math.max(best,100+n.length);
-        else if((' '+q+' ').includes(' '+n+' ')) best=Math.max(best,30+n.length*2);
-        else {
-          const hits=tokens.filter(w=>!stop.has(w)&&words.includes(w));
-          if(hits.length) best=Math.max(best, hits.length/tokens.length*12+hits.length*2);
-        }
+      t.phrases.forEach(({n,tokens})=>{
+        if((' '+q+' ').includes(' '+n+' '))best=Math.max(best,30+n.length*2);
+        else {const hits=tokens.filter(w=>!stop.has(w)&&words.includes(w));if(hits.length)best=Math.max(best,hits.length/tokens.length*12+hits.length*2);}
       });
-      if(t.parent===lastTopic&&best) best+=2;
+      if(t.parent===lastTopic&&best)best+=2;
       return {id:t.id,score:best};
     }).filter(t=>t.score>=10).sort((a,b)=>b.score-a.score);
-    if(!ranked.length) return [];
-    if(ranked[0].score>=30 && (!ranked[1]||ranked[0].score-ranked[1].score>=5)) return [ranked[0].id];
+    if(!ranked.length)return [];
+    if(ranked[0].score>=30&&(!ranked[1]||ranked[0].score-ranked[1].score>=5))return [ranked[0].id];
     return ranked.filter(t=>ranked[0].score-t.score<=5).slice(0,4).map(t=>t.id);
   }
   // Strict memory-only mode: no navigation function may run from Bariq.
@@ -70,6 +72,11 @@
   }
   function localReply(text) {
     const q=norm(text), a=account();
+    if(/(?:عايز اموت|انتحار|انتحر|اذي نفسي|ايذاء نفس|اقتل نفسي)/.test(q)){
+      push({text:'سلامتك أهم دلوقتي. لو ممكن تأذي نفسك أو الخطر قريب، ابعد عن أي حاجة ممكن تؤذيك، وخليك مع شخص تثق فيه واتصل بالطوارئ المحلية أو روح أقرب طوارئ فورًا. أنا دليل محلي ومش خدمة طوارئ، ومش بقدر أتصل بدلًا منك. إنت في أمان دلوقتي؟'});return true;
+    }
+    if(/^(?:اخبار مصر|اخبار عامه|الاخبار العامه|اخبار الدوري)$/.test(q)){push({topic:'outofscope'});return true;}
+
     if(/(?:ايميل|ايميلات|بريد|email)/.test(q)) {
       if(/(?:ايميلي|بريدي|حسابي|بتاعي|ايميل حساب|بريد حساب|my email)/.test(q)&&!/(?:عمر|مؤسس|غيري|زميلي|صحبي|صاحبي|طالب|الطلاب|الناس|الاعضاء|عضو)/.test(q))push({text:a.email?'إيميل حسابك الحالي: '+a.email:'إيميل حسابك الحالي مش متاح في بيانات الجلسة.'});
       else push({text:'أقدر أعرض إيميل حسابك الحالي فقط. مش بعرض إيميلات أي شخص تاني. لو تقصد حسابك اكتب «إيميلي إيه؟».'});return true;
