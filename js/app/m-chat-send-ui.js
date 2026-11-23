@@ -64,7 +64,7 @@ async function sendChatMsg() {
       })
     };
 
-    window.BariqProfanity.payload(msgData, _currentChatId);
+    window.BariqProfanity.payload(msgData, isPrivate ? null : 'public');
     await addDoc(collection(db, colPath), msgData);
 
     // ── حذف المسودة بعد الإرسال الناجح ──
@@ -229,7 +229,7 @@ document.getElementById("chatFileInput").addEventListener("change", async () => 
       })
     };
 
-    window.BariqProfanity.payload(msgData, _currentChatId);
+    window.BariqProfanity.payload(msgData, isPrivate ? null : 'public');
     await addDoc(collection(db, colPath), msgData);
 
     if (isPrivate && !_currentChatId.startsWith("room:")) {
