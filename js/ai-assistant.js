@@ -73,6 +73,11 @@
   }
   function push(m) {messages.push({...m,ts:Date.now()}); if(messages.length>40) messages=messages.slice(-40);render();}
   function root() {lastTopic=null;push({text:kb.greeting,choices:kb.roots});}
+  function clearSession() {
+    messages=[];lastTopic=null;sending=false;
+    const body=document.getElementById('aiChatBody');if(body)body.replaceChildren();
+    const input=document.getElementById('aiChatInput');if(input)input.value='';
+  }
   function choose(id) {if(!byId[id])return;lastTopic=id;push({out:true,text:byId[id].title});push({topic:id});}
   window._aiListItem=()=>({id:'ai',name:'بريق',photo:'',cls:'ai',lastMsg:'دليلك للموقع • شرح وخطوات واختصارات',lastTime:null,unread:0});
   window._openAiChat=()=>{window.showPage?.('page-ai-chat');if(!messages.length) root();else render();};
@@ -91,11 +96,14 @@
     const btn=e.target.closest('[data-bariq-topic],[data-bariq-action],[data-bariq-root]');if(!btn)return;
     if(btn.hasAttribute('data-bariq-root'))root();
     else if(btn.dataset.bariqTopic)choose(btn.dataset.bariqTopic);
-    else {try{const run=actions[btn.dataset.bariqAction];if(!run)throw Error('unavailable');run();}catch(_){push({text:'الاختصار مش متاح دلوقتي. افتح القسم من القائمة الأصلية، وأنا أقدر أشرح لك الطريق.'});}}
+    else {try{const run=actions[btn.dataset.bariqAction];if(!run)throw Error('unavailable');run();clearSession();if(document.getElementById('page-ai-chat')?.classList.contains('active'))root();}catch(_){push({text:'الاختصار مش متاح دلوقتي. افتح القسم من القائمة الأصلية، وأنا أقدر أشرح لك الطريق.'});}}
   });
   document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById('aiChatInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();window._sendToAI();}});
     document.getElementById('aiChatInput')?.setAttribute('maxlength','500');
+    const page=document.getElementById('page-ai-chat');
+    if(page)new MutationObserver(()=>{if(!page.classList.contains('active'))clearSession();}).observe(page,{attributes:true,attributeFilter:['class']});
+    window.addEventListener('pagehide',clearSession);
   });
   // Read-only diagnostics for dev tests, no personal content.
   window.BariqGuide = Object.freeze({match,normalize:norm,topicCount:kb.topics.length,actionIds:Object.keys(actions)});
