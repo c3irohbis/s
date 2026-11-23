@@ -180,8 +180,44 @@ test('integration hooks: calls.js records before signaling; chat-listener merges
   assert.ok(worker.includes('duration_sec'),'server computes duration');
 });
 
-test('central calls entry and row chat route use the existing app controls', () => {
-  assert.ok(src.includes('dms-fab-item[data-panel="calls"]'));
-  assert.ok(src.includes('window.openDirectChat(p)'));
+test('calls tab: inline list replaces modal and header clock; no FAB, no overlay', () => {
+  assert.ok(!src.includes('bchHistBtn'),'header clock button removed');
+  assert.ok(!src.includes('bchOverlay'),'modal overlay removed');
+  assert.ok(!src.includes('dmsCallsFab'),'no floating button');
+  assert.ok(src.includes('renderCallsList'),'tab renderer exported');
+  assert.ok(src.includes('window.openDirectChat(p)'),'row opens chat via existing control');
   assert.ok(!src.includes('window.openDMChat(p)'));
+  assert.ok(src.includes('window.BisCalls.start({ kind: "dm", peerUid: p })'),'call-back reuses BisCalls.start');
+  const dms=fs.readFileSync(path.join(__dirname,'../js/dms-page.js'),'utf8');
+  assert.ok(dms.includes('window.BisCallHistory.renderCallsList("dmsCallsList")'),'tab switch renders list');
+  assert.ok(dms.includes('"المكالمات"'),'tab title');
+  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+  const panel=html.slice(html.indexOf('dmspanel-calls'),html.indexOf('dmspanel-members'));
+  assert.ok(panel.includes('id="dmsCallsList"'),'panel hosts the list container');
+  assert.ok(!panel.includes('dms-under-dev'),'under-dev block gone from calls panel');
+});
+
+test('tab rows: order desc, consecutive same-peer grouping, missed styling, empty state',()=>{
+  const ctx=makeEnv('me');
+  const B=ctx.window.BisCallHistory._internals;
+  B.loadCache('me');
+  B.upsert(rec('a',{started_at:'2026-11-23T04:00:00Z',status:'ended',duration_sec:8,answered_at:'2026-11-23T04:00:01Z',ended_at:'2026-11-23T04:00:09Z',chat_id:'me_peer2',callee_uid:'peer2',callee_name:'سارة'}));
+  B.upsert(rec('b',{started_at:'2026-11-23T05:00:00Z',status:'no_answer',caller_uid:'peer1',caller_name:'علي',callee_uid:'me',callee_name:'أنا'}));
+  B.upsert(rec('c',{started_at:'2026-11-23T05:05:00Z',status:'no_answer',caller_uid:'peer1',caller_name:'علي',callee_uid:'me',callee_name:'أنا'}));
+  const groups=B.groupTab(['c','b','a'].map(id=>B.snapshot().items[id]),'me');
+  assert.equal(groups.length,2,'consecutive same-peer records group together');
+  assert.equal(groups[0].count,2,'group count');
+  assert.equal(groups[0].missed,true,'incoming no_answer is missed');
+  assert.equal(groups[1].missed,false,'outgoing ended is not missed');
+  const html=B.tabRowsHtml('me');
+  assert.ok(html.includes('الحديثة'),'Recent section header');
+  assert.ok(html.includes('bch-missed'),'missed row styled red');
+  assert.ok(html.includes('(٢)'),'arabic-indic group counter');
+  assert.equal((html.match(/bch-call-row/g)||[]).length,2,'one row per group, no duplicates');
+  assert.ok(html.includes('اليوم،'),'today label');
+  /* فارغ: رسالة بسيطة */
+  const ctx2=makeEnv('me');
+  const B2=ctx2.window.BisCallHistory._internals;
+  B2.loadCache('me');
+  assert.ok(B2.tabRowsHtml('me').includes('لا مكالمات بعد'),'empty state');
 });
