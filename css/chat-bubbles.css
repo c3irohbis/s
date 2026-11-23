@@ -272,3 +272,8 @@ html.theme-light .bubble.me { background: color-mix(in srgb, var(--user-bubble-c
 html.theme-light .bubble.other .bubble-text { color: var(--other-bubble-text, var(--chat-other-text)); }
 html.theme-light .bubble.me .bubble-text { color: var(--user-bubble-text, #0d1f3c); }
 html.theme-light .bubble.me .bubble-time-in { color: var(--user-bubble-text, rgba(13,31,60,.65)); }
+
+/* بطاقة فحص 7: منع فيضان فقاعات الشات خارج عرض الشاشة (تُحمَّل بعد style.css فتغلب) */
+.msg-bubble-group { max-width: 100%; min-width: 0; }
+.msg-line { max-width: 100%; min-width: 0; }
+.msg-line > .bubble { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
