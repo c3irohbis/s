@@ -377,4 +377,8 @@ document.getElementById("ownerSearchInput")?.addEventListener("input", e => {
   ));
 });
 
+// index.html (users manager refresh button) calls these from an inline onclick, so they must be on window
+window.loadOwnerUsers = loadOwnerUsers;
+window.loadOwnerStats = loadOwnerStats;
+
 export { loadAdminUsers, loadOwnerStats };
