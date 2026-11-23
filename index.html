@@ -838,13 +838,9 @@ if ("serviceWorker" in navigator) {
       </div>
     </div>
 
-    <!-- المكالمات -->
+    <!-- المكالمات: سجل «الحديثة» يُرسم من الكاش عبر BisCallHistory.renderCallsList -->
     <div class="dms-panel" id="dmspanel-calls">
-      <div class="dms-under-dev">
-        <i class="fa-solid fa-phone"></i>
-        <div class="dms-ud-title">المكالمات</div>
-        <div class="dms-ud-sub">هذه الميزة قيد التطوير</div>
-      </div>
+      <div class="dms-list" id="dmsCallsList"></div>
     </div>
 
     <!-- الأعضاء -->
@@ -1925,11 +1921,11 @@ function ownerToggleSection(headerEl) {
 <script type="module" src="js/poll.js?v=read-head-1"></script>
 <script type="module" src="js/members-list.js?v=browse-pages-5"></script>
 <script type="module" src="js/mention.js?v=scoped-3"></script>
-<script type="module" src="js/dms-page.js?v=profile-6"></script>
+<script type="module" src="js/dms-page.js?v=profile-7"></script>
 <script type="module" src="js/dm-extras.js?v=unread-anchor-1"></script>
 <script src="js/chat-presence-text.js?v=2"></script>
 <script src="js/calls.js?v=7" defer></script>
-<script src="js/call-history.js?v=2" defer></script>
+<script src="js/call-history.js?v=3" defer></script>
 <script type="module" src="js/attendance.js?v=month-2"></script>
 <script src="js/ai-config.js"></script>
 <script src="js/bubble-color.js" defer></script>
