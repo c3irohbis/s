@@ -174,7 +174,7 @@ async function handle(req, env) {
     if (row.caller_uid !== uid) return response(req, 403, {error:'id-taken'}); /* إعادة استعمال خبيثة لمعرف */
     return response(req, 200, {record: row, created: row.status === 'ringing'});
   }
-  const mAct = /^\/v1\/calls\/([0-9a-fA-F-]{36})\/(accept|decline|cancel|end)$/.exec(path);
+  const mAct = /^\/v1\/calls\/([0-9a-fA-F-]{36})\/(accept|decline|cancel|end|fail)$/.exec(path);
   if (req.method === 'POST' && mAct) {
     if (!rateLimit('w:'+uid, 60)) return response(req, 429, {error:'rate-limited'});
     const id = mAct[1], action = mAct[2];
@@ -194,6 +194,10 @@ async function handle(req, env) {
       const row = await guardedPatch(env, id, '&caller_uid=eq.' + esc(uid) + '&status=eq.ringing',
         {status: reason === 'no_answer' ? 'no_answer' : 'canceled'});
       if (row) return response(req, 200, {record: row});
+    } else if (action === 'fail') {
+      const row = await guardedPatch(env, id, '&or=(caller_uid.eq.' + esc(uid) + ',callee_uid.eq.' + esc(uid) + ')&status=eq.accepted',
+        {status:'failed'});
+      if (row) return response(req,200,{record:row});
     } else { /* end: أول كاتب يكسب، والمدة تُحسب خادميًا من الطوابع المخزنة */
       const cur = await getRow(env, id);
       if (!cur) return response(req, 404, {error:'not-found'});
