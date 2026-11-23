@@ -51,7 +51,7 @@ window.sendChatMsg = async function() {
       ..._replyData.pdf   ? { pdf:   true, fileName: _replyData.fileName||"" } : {},
       ..._replyData.file  ? { file:  true, fileName: _replyData.fileName||"" } : {},
     };
-    window.BariqProfanity.payload(msgData, _currentChatId);
+    window.BariqProfanity.payload(msgData, isPrivate ? null : 'public');
     await addDoc(collection(db, colPath), msgData);
     const _isTrueDM2 = isPrivate && !_currentChatId.startsWith("room:");
     if (_isTrueDM2) {
