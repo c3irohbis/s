@@ -341,7 +341,7 @@
         row.addEventListener("click", function () {
           var p = row.getAttribute("data-peer");
           close();
-          try { if (p && typeof window.openDMChat === "function") window.openDMChat(p); } catch (e) {}
+          try { if (p && typeof window.openDirectChat === "function") window.openDirectChat(p); } catch (e) {}
         });
       });
     }
@@ -385,6 +385,11 @@
   /* ── أيقونة السجل بجانب زر المكالمة في هيدر الشات (حقن ذاتي، بلا تعديل HTML) ── */
   function ensureBtn() {
     try {
+      var central = document.querySelector('.dms-fab-item[data-panel="calls"]');
+      if (central && !central.dataset.bchBound) {
+        central.dataset.bchBound = "1";
+        central.addEventListener("click", function () { open({ kind: "all" }); });
+      }
       var callBtn = $("chatCallBtn") || document.querySelector(".newchat-shell .call-circle svg:not(#chatMenuBtn)");
       if (!callBtn || $("bchHistBtn")) return;
       var host = callBtn.closest("svg") || callBtn;
