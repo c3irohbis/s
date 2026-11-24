@@ -1,0 +1,389 @@
+(function() {
+  /* ── THEME SYSTEM (with Auto / prefers-color-scheme) ── */
+  // تنبيه: الوضع الفاتح متوقف مؤقتًا للإصلاح. لإعادة التفعيل غيّر القيمة إلى false.
+  let LIGHT_MODE_DISABLED = (function () { try { return localStorage.getItem("_lightLocked") === "1"; } catch (e) { return false; } })();
+  const THEME_KEY   = "app_theme";
+  const FS_KEY      = "chat_font_size";
+  const FW_KEY      = "chat_font_weight";
+  const FW_V2_KEY   = "chat_font_weight_v2"; // ترحيل الافتراضي القديم (3) إلى الجديد (6) مرة واحدة
+  const FW_DEFAULT  = 6;
+  const CHAT_KEY    = "chat_prefs";
+  const PRIV_KEY    = "privacy_prefs";
+  let _currentTheme = "dark";   // actual applied theme: "dark" | "light"
+  let _themeChoice  = "auto";   // user's stored choice: "dark" | "light" | "auto"
+  let _chatPrefs    = { enterSend: false, sound: true };
+  let _privPrefs    = { readReceipts: true };
+
+  /* ── Resolve effective theme from choice ── */
+  function _resolveTheme(choice) {
+    if (LIGHT_MODE_DISABLED) return "dark";
+    if (choice === "light") return "light";
+    if (choice === "dark")  return "dark";
+    // "auto" or anything else → follow system
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+
+  /* Apply theme immediately from localStorage (before auth) */
+  (function _initTheme() {
+    const saved = localStorage.getItem(THEME_KEY) || "auto";
+    _themeChoice = saved;
+    _applyThemeDOM(_resolveTheme(saved));
+  })();
+
+  function _applyThemeDOM(theme) {
+    _currentTheme = theme;
+    if (theme === "light") {
+      document.documentElement.classList.add("theme-light");
+    } else {
+      document.documentElement.classList.remove("theme-light");
+    }
+    const _tb = document.getElementById("themeToggleBtn");
+    if (_tb) _tb.classList.toggle("is-light", theme === "light");
+    /* sync buttons */
+    document.querySelectorAll(".smod-theme-btn").forEach(b => {
+      // active if: (dark btn & theme is dark & choice is dark) etc.
+      // auto btn active when choice is "auto"
+      if (b.id === "themeBtn-auto") {
+        b.classList.toggle("active", _themeChoice === "auto");
+      } else {
+        b.classList.toggle("active", b.id === "themeBtn-" + theme && _themeChoice !== "auto");
+      }
+    });
+  }
+
+  /* ── Listen for OS-level theme changes (only when choice is "auto") ── */
+  const _mq = window.matchMedia("(prefers-color-scheme: light)");
+  function _onSystemThemeChange() {
+    if (_themeChoice === "auto") {
+      _applyThemeDOM(_resolveTheme("auto"));
+    }
+  }
+  try {
+    _mq.addEventListener("change", _onSystemThemeChange);
+  } catch(e) {
+    try { _mq.addListener(_onSystemThemeChange); } catch(e2) {}
+  }
+
+  /* قفل/فتح الوضع الفاتح لكل المستخدمين (بيتحكم فيه المالك من نافذة تصميم موقع) — اختيار المستخدم المحفوظ ما بيتغيّرش */
+  window._setLightModeLocked = function(locked) {
+    LIGHT_MODE_DISABLED = !!locked;
+    _applyThemeDOM(_resolveTheme(_themeChoice));
+  };
+
+  window.applyTheme = async function(theme) {
+    if (LIGHT_MODE_DISABLED && theme !== "dark") {
+      window.toast && window.toast("الوضع الفاتح قيد الإصلاح حاليًا، سيعود قريبًا.", "error");
+      return;
+    }
+    // theme: "dark" | "light" | "auto"
+    _themeChoice = theme;
+    var _themeAt = Date.now();
+    localStorage.setItem(THEME_KEY, theme);
+    try { localStorage.setItem("app_theme_at", String(_themeAt)); } catch(e) {}
+    _applyThemeDOM(_resolveTheme(theme));
+    /* Also persist to Firestore if user is logged in */
+    const uid = window.currentUser?.uid;
+    if (uid && window.db) {
+      try {
+        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+        await setDoc(doc(window.db, "users", uid, "settings", "appPrefs"), { theme, themeAt: _themeAt }, { merge: true });
+      } catch(e) {}
+    }
+  };
+
+  /* Load theme from Firestore after login (overrides localStorage) */
+  window._loadAppPrefs = async function(uid) {
+    if (!uid || !window.db) return;
+    try {
+      const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+      const snap = await getDoc(doc(window.db, "users", uid, "settings", "appPrefs"));
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.theme) {
+          /* لو اختيارك المحلي أحدث من المحفوظ على الخادم: نبقيه ونرفعه للخادم —
+             بدل ما الثيم (والخلفية) يرجع للقديم بعد ثوانٍ من فتح الموقع */
+          var _localAt = +(localStorage.getItem("app_theme_at") || 0), _serverAt = +(d.themeAt || 0);
+          var _localChoice = localStorage.getItem(THEME_KEY);
+          if (_localAt > _serverAt && _localChoice && _localChoice !== d.theme) {
+            try { await setDoc(doc(window.db, "users", uid, "settings", "appPrefs"), { theme: _localChoice, themeAt: _localAt }, { merge: true }); } catch(_e) {}
+          } else {
+            _themeChoice = d.theme;
+            localStorage.setItem(THEME_KEY, d.theme);
+            if (_serverAt) { try { localStorage.setItem("app_theme_at", String(_serverAt)); } catch(_e) {} }
+            _applyThemeDOM(_resolveTheme(d.theme));
+          }
+        }
+        if (typeof d.chatFontSize === "number") { localStorage.setItem(FS_KEY, d.chatFontSize); _applyChatFontSizeDOM(d.chatFontSize); }
+        if (typeof d.chatFontWeight === "number") {
+          let _fw = d.chatFontWeight;
+          if (!d.chatFontWeightV2) {
+            // القيمة المخزّنة هي الافتراضي القديم (3) => تتحول للافتراضي الجديد مرة واحدة
+            if (_fw === 3) _fw = FW_DEFAULT;
+            try { await setDoc(doc(window.db, "users", uid, "settings", "appPrefs"), { chatFontWeight: _fw, chatFontWeightV2: true }, { merge: true }); } catch(_e) {}
+          }
+          localStorage.setItem(FW_KEY, _fw); localStorage.setItem(FW_V2_KEY, "1");
+          _applyChatFontWeightDOM(_fw);
+        }
+        if (d.chatPrefs)   { _chatPrefs = { ..._chatPrefs, ...d.chatPrefs }; _syncChatPrefs(); }
+        if (d.privPrefs)   { _privPrefs = { ..._privPrefs, ...d.privPrefs }; _syncPrivPrefs(); }
+      } else {
+        /* Load from localStorage fallback */
+        const lt = localStorage.getItem(THEME_KEY) || "auto";
+        _themeChoice = lt;
+        _applyThemeDOM(_resolveTheme(lt));
+      }
+    } catch(e) {
+      const lt = localStorage.getItem(THEME_KEY) || "auto";
+      _themeChoice = lt;
+      _applyThemeDOM(_resolveTheme(lt));
+    }
+  };
+
+  /* ── CHAT FONT SIZE ── */
+  function _applyChatFontSizeDOM(size) {
+    document.querySelectorAll(".bubble-text, .poll-question, .poll-opt-label").forEach(el => {
+      el.style.fontSize = size + "px";
+    });
+    /* Inject persistent style */
+    let styleEl = document.getElementById("_chatFontStyle");
+    if (!styleEl) { styleEl = document.createElement("style"); styleEl.id = "_chatFontStyle"; document.head.appendChild(styleEl); }
+    styleEl.textContent = `.bubble-text { font-size: ${size}px !important; } .poll-opt-label { font-size: ${size}px !important; }`;
+    const sel = document.getElementById("chatFontSize");
+    if (sel) sel.value = String(size);
+  }
+
+  window.applyChatFontSize = async function(val) {
+    const size = parseInt(val, 10);
+    localStorage.setItem(FS_KEY, size);
+    _applyChatFontSizeDOM(size);
+    const uid = window.currentUser?.uid;
+    if (uid && window.db) {
+      try {
+        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+        await setDoc(doc(window.db, "users", uid, "settings", "appPrefs"), { chatFontSize: size }, { merge: true });
+      } catch(e) {}
+    }
+  };
+
+  /* ── CHAT FONT WEIGHT (سُمك الخط داخل صناديق الدردشة فقط) ──
+     سلايدر من 1 إلى 10 — المستوى 3 يطابق السُمك الافتراضي الحالي (400) بالظبط.
+     الصيغة: weight = 400 + (level-3)*70 محصورة بين 300 و900 (أقصى وزن حمّلناه من الخط). */
+  function _chatFontWeightValue(level) {
+    const w = 400 + (level - 3) * 70;
+    return Math.max(300, Math.min(900, w));
+  }
+  function _applyChatFontWeightDOM(level) {
+    const weight = _chatFontWeightValue(level);
+    let styleEl = document.getElementById("_chatFontWeightStyle");
+    if (!styleEl) { styleEl = document.createElement("style"); styleEl.id = "_chatFontWeightStyle"; document.head.appendChild(styleEl); }
+    styleEl.textContent = `.bubble-text { font-weight: ${weight} !important; }`;
+    const rng = document.getElementById("chatFontWeight");
+    const lbl = document.getElementById("chatFontWeightVal");
+    if (rng) rng.value = String(level);
+    if (lbl) lbl.textContent = String(level);
+  }
+
+  window.applyChatFontWeight = async function(val) {
+    const level = parseInt(val, 10);
+    localStorage.setItem(FW_KEY, level);
+    localStorage.setItem(FW_V2_KEY, "1");
+    _applyChatFontWeightDOM(level);
+    const uid = window.currentUser?.uid;
+    if (uid && window.db) {
+      try {
+        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+        await setDoc(doc(window.db, "users", uid, "settings", "appPrefs"), { chatFontWeight: level, chatFontWeightV2: true }, { merge: true });
+      } catch(e) {}
+    }
+  };
+
+  /* ── CHAT PREFS ── */
+  function _syncChatPrefs() {
+    const el1 = document.getElementById("sChat_enterSend");
+    const el2 = document.getElementById("sChat_sound");
+    if (el1) el1.checked = !!_chatPrefs.enterSend;
+    if (el2) el2.checked = _chatPrefs.sound !== false;
+  }
+
+  window.saveChatPref = async function(key, val) {
+    _chatPrefs[key] = val;
+    localStorage.setItem(CHAT_KEY, JSON.stringify(_chatPrefs));
+    const uid = window.currentUser?.uid;
+    if (uid && window.db) {
+      try {
+        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+        await setDoc(doc(window.db, "users", uid, "settings", "appPrefs"), { chatPrefs: _chatPrefs }, { merge: true });
+      } catch(e) {}
+    }
+  };
+
+  /* ── PRIVACY PREFS ── */
+  function _syncPrivPrefs() {
+    const el2 = document.getElementById("sPriv_readReceipts");
+    if (el2) el2.checked = _privPrefs.readReceipts !== false;
+  }
+
+  window.savePrivacyPref = async function(key, val) {
+    _privPrefs[key] = val;
+    localStorage.setItem(PRIV_KEY, JSON.stringify(_privPrefs));
+    const uid = window.currentUser?.uid;
+    if (uid && window.db) {
+      try {
+        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+        await setDoc(doc(window.db, "users", uid, "settings", "appPrefs"), { privPrefs: _privPrefs }, { merge: true });
+      } catch(e) {}
+    }
+  };
+
+  /* ── SETTINGS MODAL OPEN/CLOSE ── */
+  window.openSettingsModal = function() {
+    const modal = document.getElementById("settingsModal");
+    if (!modal) return;
+    const _alreadyOpen = modal.classList.contains("open");
+    modal.classList.add("open");
+    document.body.style.overflow = "hidden";
+    /* Sync all toggles */
+    _applyThemeDOM(_currentTheme);
+    _syncChatPrefs();
+    _syncPrivPrefs();
+    const savedFs = parseInt(localStorage.getItem(FS_KEY) || "14", 10);
+    const sel = document.getElementById("chatFontSize");
+    if (sel) sel.value = String(savedFs);
+    /* Sync notif toggles in settings panel */
+    _syncSettingsNotifToggles();
+    /* Load prefs from Firestore if needed */
+    if (window.currentUser?.uid) {
+      if (typeof window._loadPrefs === "function") window._loadPrefs(window.currentUser.uid);
+    }
+    switchSettingsTab(null);
+    // ── دعم زر الرجوع الفعلي بالهاتف (نفس نمط قسم المنتدى بالضبط) ──
+    if (!_alreadyOpen) {
+      window._navPush?.("settings", () => window.closeSettingsModal());
+    }
+  };
+
+  window.closeSettingsModal = function() {
+    if (window._navGoBackIfMatches?.("settings")) return;
+    const modal = document.getElementById("settingsModal");
+    if (!modal) return;
+    modal.classList.remove("open");
+    document.body.style.overflow = "";
+  };
+
+  /* ESC to close */
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape") window.closeSettingsModal();
+  });
+
+  /* ── TABS / القائمة الرئيسية ── */
+  const _SETTINGS_TITLES = {
+    appearance:    "المظهر",
+    notifications: "الإشعارات",
+    privacy:       "الخصوصية والأمان",
+    chat:          "إعدادات المحادثات",
+    account:       "حسابي"
+  };
+
+  window.switchSettingsTab = function(tab) {
+    document.querySelectorAll(".smod-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".smod-panel").forEach(p => p.classList.remove("active"));
+    const list = document.getElementById("settingsListView");
+    const backBtn = document.getElementById("smodBackBtn");
+    const titleText = document.getElementById("smodTitleText");
+
+    if (!tab) {
+      // الرجوع إلى القائمة العمودية الرئيسية
+      if (list) list.classList.add("active");
+      if (backBtn) backBtn.style.display = "none";
+      if (titleText) titleText.textContent = "الإعدادات";
+      return;
+    }
+
+    if (list) list.classList.remove("active");
+    if (backBtn) backBtn.style.display = "flex";
+    if (titleText) titleText.textContent = _SETTINGS_TITLES[tab] || "الإعدادات";
+
+    const tb = document.getElementById("stab-" + tab);
+    const pn = document.getElementById("spanel-" + tab);
+    if (tb) tb.classList.add("active");
+    if (pn) pn.classList.add("active");
+    if (tab === "notifications") _syncSettingsNotifToggles();
+  };
+
+  /* الرجوع من أي قسم فرعي إلى القائمة العمودية الرئيسية */
+  window._settingsShowList = function() {
+    switchSettingsTab(null);
+  };
+
+  /* ── NOTIF PREFS SYNC to settings panel toggles ── */
+  /* The existing saveNotifPref & isNotifAllowed live in the original NS system.
+     We mirror their state into our sPref_ toggles. */
+  const NS_KEYS = ["dm","reply","mention","admin","news","lectures","exams","sections"];
+
+  function _syncSettingsNotifToggles() {
+    NS_KEYS.forEach(k => {
+      const inp = document.getElementById("sPref_" + k);
+      if (inp) inp.checked = window.isNotifAllowed ? window.isNotifAllowed(k) : true;
+    });
+    /* Also show saving indicator hidden */
+    const sv = document.getElementById("smodSaving");
+    if (sv) sv.style.opacity = "0";
+  }
+
+  /* Patch saveNotifPref to also sync our new toggles */
+  document.addEventListener("DOMContentLoaded", function() {
+    const _origSave = window.saveNotifPref;
+    if (typeof _origSave === "function") {
+      window.saveNotifPref = function(key, val) {
+        /* Sync both sets of toggles */
+        const old = document.getElementById("nsPref_" + key);
+        if (old) old.checked = val;
+        const newInp = document.getElementById("sPref_" + key);
+        if (newInp) newInp.checked = val;
+        /* Show saving in settings modal */
+        const sv = document.getElementById("smodSaving");
+        if (sv) { sv.style.opacity = "1"; setTimeout(() => { sv.style.opacity = "0"; }, 1200); }
+        return _origSave.call(this, key, val);
+      };
+    }
+
+    /* Also patch notifSetAll */
+    const _origAll = window.notifSetAll;
+    if (typeof _origAll === "function") {
+      window.notifSetAll = function(enable) {
+        _origAll.call(this, enable);
+        _syncSettingsNotifToggles();
+        /* Sync old panel too */
+        NS_KEYS.forEach(k => {
+          const old = document.getElementById("nsPref_" + k);
+          if (old) old.checked = enable;
+        });
+      };
+    }
+
+    /* Init localStorage prefs */
+    try { _chatPrefs = { ..._chatPrefs, ...JSON.parse(localStorage.getItem(CHAT_KEY) || "{}") }; } catch(e) {}
+    try { _privPrefs = { ..._privPrefs, ...JSON.parse(localStorage.getItem(PRIV_KEY) || "{}") }; } catch(e) {}
+    const savedFs = parseInt(localStorage.getItem(FS_KEY) || "14", 10);
+    _applyChatFontSizeDOM(savedFs);
+    // ترحيل مرة واحدة: لا قيمة محفوظة أو القيمة القديمة الافتراضية (3) => الافتراضي الجديد (6)
+    if (!localStorage.getItem(FW_V2_KEY)) {
+      const _oldFw = localStorage.getItem(FW_KEY);
+      if (_oldFw === null || _oldFw === "3") localStorage.setItem(FW_KEY, String(FW_DEFAULT));
+      localStorage.setItem(FW_V2_KEY, "1");
+    }
+    const savedFw = parseInt(localStorage.getItem(FW_KEY) || String(FW_DEFAULT), 10);
+    _applyChatFontWeightDOM(savedFw);
+  });
+
+  /* ── Hook into auth to load Firestore prefs after login ── */
+  /* We patch onAuthStateChanged completion by overriding _startNotifListener
+     since it's called after currentUser is set */
+  const _origStartNotif = window._startNotifListener;
+  window._startNotifListener = function(uid) {
+    /* Load app prefs from Firestore */
+    window._loadAppPrefs(uid);
+    if (typeof _origStartNotif === "function") return _origStartNotif.apply(this, arguments);
+  };
+
+})();

@@ -1,0 +1,8 @@
+{
+  "epoch": 4,
+  "generation": "e177c6008e3358beef5563e43f0fb432a8bbda80bc22d982a8ecba0cbf7fb47c",
+  "manifest": "manifests/e177c6008e3358beef5563e43f0fb432a8bbda80bc22d982a8ecba0cbf7fb47c.json",
+  "manifestSHA256": "f4fd5fd7173dc139602c0fb3d41381536a81b9a883f67df31761abc1c97f2cdb",
+  "rollback": false,
+  "schema": 1
+}

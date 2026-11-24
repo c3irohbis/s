@@ -1,0 +1,8 @@
+{
+  "epoch": 5,
+  "generation": "108f5031228282d3525db135373dbce5d27eb6551facc0cf259b8454594cacb2",
+  "manifest": "manifests/108f5031228282d3525db135373dbce5d27eb6551facc0cf259b8454594cacb2.json",
+  "manifestSHA256": "f6c75b590718c4bd6994f365fd8d77aabb33fba83ba2a6275431852730907a21",
+  "rollback": true,
+  "schema": 1
+}
