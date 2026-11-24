@@ -1,0 +1,4 @@
+/* Generated app bridge. Update prepares a generation;only explicit reload changes this page. */
+(function(){'use strict';sessionStorage.removeItem('bis-gateway-attempt');
+window._checkForUpdates=async function(){const worker=navigator.serviceWorker.controller;if(!worker)throw Error('No gateway controller');return new Promise((resolve,reject)=>{const channel=new MessageChannel();const timer=setTimeout(()=>{channel.port1.close();reject(Error('Update timeout'));},30000);channel.port1.onmessage=event=>{clearTimeout(timer);channel.port1.close();if(event.data.state!=='ready'){reject(Error(event.data.reason||'Update unavailable'));return;}if(typeof window.toast==='function')window.toast('نسخة جاهزة. اقفل الصفحة وافتحها لتطبيقها.');resolve(event.data);};worker.postMessage({type:'BIS_GATEWAY_CHECK',protocol:1},[channel.port2]);});};
+})();
