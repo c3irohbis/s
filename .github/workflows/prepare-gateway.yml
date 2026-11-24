@@ -1,0 +1,34 @@
+name: Prepare reviewed gateway release
+on:
+  workflow_dispatch:
+    inputs:
+      expected_main:
+        description: Exact current main commit
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: gateway-g4-prepare
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main' && github.sha == inputs.expected_main
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: gateway-g4-staging
+          path: staging-input
+          persist-credentials: false
+      - name: Verify approved program before execution
+        run: echo '27b740efab3989ecca6c41edb940a20a1ee339dee1c63686db10730050c4feb1  staging-input/apply_release.py' | sha256sum --check --strict
+      - name: Validate and prepare release branch only
+        env:
+          EXPECTED_MAIN: ${{ inputs.expected_main }}
+          PAYLOAD_SHA256: f04aab0cf8b15c54778ab48c5a7d8eefa3112081efbe38cff8111a3d74d0c57f
+        run: python3 staging-input/apply_release.py staging-input/gateway-g4-release.zip
