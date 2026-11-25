@@ -21,9 +21,14 @@ function makeAdder(btnId, getFields, colName, successMsg, reloadFn) {
     let saved = false;
     let _newId = null;
     try {
-      const _ref = await addDoc(collection(db, colName), { ...fields, worldId: _worldId, createdAt: serverTimestamp() });
+      const _ref = colName==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')?await window.NewsFeed.add(fields,{world:_worldId}):await addDoc(collection(db, colName), { ...fields, worldId: _worldId, createdAt: serverTimestamp() });
       _newId = _ref && _ref.id;
       saved = true;
+      if(colName==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){
+        const prefix=btnId==='oAddNewsBtn'?'oNews':'news';
+        const titleEl=document.getElementById(prefix+'Title'),bodyEl=document.getElementById(prefix+'Body');
+        if(titleEl?.value.trim()===fields.title&&bodyEl?.value.trim()===fields.body){titleEl.value='';bodyEl.value='';}
+      }
     } catch(e) {
       toast("فشلت الإضافة", "error");
       console.error(e);
@@ -31,8 +36,10 @@ function makeAdder(btnId, getFields, colName, successMsg, reloadFn) {
     }
     if (saved) {
       toast(successMsg, "success");
+      if(colName==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){try{reloadFn();}catch{}return;}
       try { window.CardGateway?.syncAfterWrite(colName, _newId, _worldId); } catch(_) {} // مزامنة البوابة (كامنة) — لا تمنع الإضافة أبدًا
       try { reloadFn(); } catch(_) {}
+      if(colName==='news'&&(window.__BLISS_NEWS_MODE!=='firebase'))return;
       // FCM: notify all users
       const _nt = { news: "📰 خبر جديد", lectures: "📚 محاضرة جديدة", exams: "📅 امتحان جديد", sections: "🏫 سكشن جديد" };
       _notifyAllUsers(
@@ -53,8 +60,7 @@ makeAdder("addNewsBtn", () => {
   const title = document.getElementById("newsTitle").value.trim();
   const body  = document.getElementById("newsBody").value.trim();
   if (!title) { toast("اكتب عنوان الخبر","error"); return null; }
-  document.getElementById("newsTitle").value = "";
-  document.getElementById("newsBody").value  = "";
+  if(!(window.__BLISS_NEWS_MODE!=='firebase')){document.getElementById("newsTitle").value="";document.getElementById("newsBody").value="";}
   return { title, body };
 }, "news", "تم نشر الخبر", loadNews);
 
@@ -108,8 +114,7 @@ makeAdder("oAddNewsBtn", () => {
   const title = document.getElementById("oNewsTitle").value.trim();
   const body  = document.getElementById("oNewsBody").value.trim();
   if (!title) { toast("اكتب عنوان الخبر","error"); return null; }
-  document.getElementById("oNewsTitle").value = "";
-  document.getElementById("oNewsBody").value  = "";
+  if(!(window.__BLISS_NEWS_MODE!=='firebase')){document.getElementById("oNewsTitle").value="";document.getElementById("oNewsBody").value="";}
   return { title, body };
 }, "news", "تم نشر الخبر", loadNews);
 
