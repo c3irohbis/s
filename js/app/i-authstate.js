@@ -1,3 +1,4 @@
+import { AuthorityClient } from "../authority-client.js";
 /* split from js/app-main.js (block I_authstate) — verbatim code; cross-module state writes go through __set_* helpers */
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -19,7 +20,27 @@ import { _fillProfInfoCard, _syncBioCards } from "./v-profile-cards-picctx.js";
 /* يسمح لواجهة الدخول بتشغيل منطق فتح الموقع مباشرة بدون إعادة تحميل الصفحة */
 let _authStateHandler = null;
 window._runAuthState = () => (_authStateHandler ? _authStateHandler(auth.currentUser) : undefined);
+// Local diagnostics bridge. No diagnostic error may escape into Auth.
+try {
+  if (!window.__insCaptureAuth) {
+    let epoch = 0, eligible = false, account = null, token = null;
+    const notify = () => { try { window.InstructionsModule?.capture?.revokeLocal(); } catch (_) {} };
+    const api = Object.freeze({
+      beginAuthTransition(user) { epoch++; eligible = false; account = user; token = Object.freeze({ epoch }); notify(); return token; },
+      setOwnerEligibility(t, owner, user) {
+        if (t !== token || t?.epoch !== epoch || user !== account || user !== auth.currentUser) return false;
+        eligible = owner === true; return true;
+      },
+      revoke() { epoch++; eligible = false; token = null; account = null; notify(); },
+      getEligibility() { return Object.freeze({ epoch, eligible }); }
+    });
+    Object.defineProperty(window, '__insCaptureAuth', { value: api, configurable: false, writable: false });
+  }
+} catch (_) {}
 onAuthStateChanged(auth, _authStateHandler = async (user) => {
+  let _insAuthToken;
+  try { _insAuthToken = window.__insCaptureAuth?.beginAuthTransition(user); } catch (_) {}
+
 
   // ✅ أثناء الدخول/التسجيل/تأكيد البريد/إكمال البيانات من واجهة الدخول الجديدة
   // (Firebase يُطلق هذا الـ callback فور الدخول أو إنشاء الحساب، قبل ما تكتمل الخطوات)
@@ -54,6 +75,17 @@ onAuthStateChanged(auth, _authStateHandler = async (user) => {
   try { window.__apkPromptAfterLogin?.(); } catch (_) {} // اقتراح تحميل التطبيق (متصفح فقط) — يعمل أيضًا مع الجلسة المحفوظة
   try { window.__updateNoticeStart?.(); } catch (_) {} // إشعار نشر تحديث عالمي — مستمع واحد على config/appUpdate
 
+  if (AuthorityClient.enabled()) {
+    try {
+      const authority = await AuthorityClient.status(user);
+      if (authority.pending) await AuthorityClient.recover(user);
+      if (authority.deleted || authority.isBanned) { await signOut(auth); return; }
+    } catch (e) {
+      // Missing authority is normal before profile completion. Other failures
+      // cannot grant News access because its server authorizes independently.
+      console.warn("Account authority check not complete");
+    }
+  }
   let userData = null;
   let _readSucceeded = false;
   try {
@@ -119,9 +151,11 @@ onAuthStateChanged(auth, _authStateHandler = async (user) => {
   window._maintenanceApply?.();
 
   if (user.uid === OWNER_UID && currentRole !== ROLES.OWNER) {
-    await updateDoc(doc(db, "users", user.uid), { role: ROLES.OWNER });
+    if (!AuthorityClient.enabled()) await updateDoc(doc(db, "users", user.uid), { role: ROLES.OWNER });
     __set_currentRole(ROLES.OWNER);
   }
+
+  try { window.__insCaptureAuth?.setOwnerEligibility(_insAuthToken, currentRole === ROLES.OWNER, user); } catch (_) {}
 
   // Phase 1 / 5.1 — Owner activeWorld: حالة جلسة فقط (sessionStorage)، بدون أي كتابة لبيانات Owner
   if (currentRole === ROLES.OWNER) {

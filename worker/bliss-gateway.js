@@ -1,3 +1,4 @@
+import {handleAuthority,drainAuthority} from './authority-routes.js';
 /* ══════════════════════════════════════════════════════════════════
    bliss-gateway — بوابة «بليس» (المرحلة 1: الأساس)
    المرحلة 1: GET /v1/health و GET /v1/config. المرحلة 2 (كارت التعليمات التجريبي):
@@ -1087,6 +1088,13 @@ async function handleMediaUpload(request,env,user) {
 }
 
 export default {
+  async scheduled(controller,env,ctx) {
+    if(env.AUTHORITY_MODE!=='supabase')return;
+    ctx.waitUntil(drainAuthority(env,{rpc:async(name,body)=>{
+      const r=await sb(env,'/rpc/'+name,{method:'POST',body});
+      if(!r.ok)throw Error('authority-drain-backend');return r.data;
+    }}));
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     // 1) OPTIONS ← 204 للأصول المسموحة فقط
@@ -1108,6 +1116,7 @@ export default {
     if (isHealth) return ok(request, env, { ok: true }, { complete: true, count: 0, generatedAt: Date.now() }, { "Cache-Control": "no-store" });
 
     const ROUTES = {
+      "GET /v1/authority":1,"POST /v1/authority":1,
       "GET /v1/content/instructions/badge":1,"POST /v1/content/instructions/read":1,"POST /v1/admin/content/instructions": 1, "POST /v1/media/upload": 1, "GET /v1/config": 1, "GET /v1/content/instructions": 1,
       "POST /v1/admin/sync/instructions": 1, "GET /v1/admin/reconcile/instructions": 1,
       "POST /v1/admin/reconcile/instructions/fix": 1, "GET /v1/admin/shadow/instructions": 1,
@@ -1138,6 +1147,16 @@ export default {
     try { user = await verifyToken(m[1], env.FIREBASE_PROJECT_ID); }
     catch (_) { return err(request, env, 401, "invalid-token"); }
     if (!rateLimit("uid:" + user.sub, 120)) return err(request, env, 429, "rate-limited");
+
+    if(url.pathname==='/v1/authority') {
+      const response=await handleAuthority(request,env,user,{rpc:async(name,body)=>{
+        const r=await sb(env,'/rpc/'+name,{method:'POST',body});
+        if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'authority-backend');
+        return r.data;
+      }});
+      const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);
+      return new Response(response.body,{status:response.status,headers});
+    }
 
     // مسارات الإدارة: المالك فقط (uid الثابت، يطابق isOwner() في القواعد)
     const isAdmin = url.pathname.startsWith("/v1/admin/") || (cardRoute && cardRoute.op !== "content");
