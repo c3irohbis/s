@@ -61,7 +61,7 @@ self.addEventListener('notificationclick', function(event) {
 });
 
 // Distribution gateway1. FCM above is preserved;only this component owns release caches.
-const GW_SHELL = {"bridgeSHA256":"0e8f58d1c477c85a94aa9a22f1bc78142e9941a2ca02047f8e2d0d59c08ed64b","engine":"50191cff35b365a6ce5dd0843557c6907becdec3d83d916c91a3112ad17e4588","schema":1,"shellSHA256":"90f4dbf0b3ad914244ec7ec946ebf2977df9cdbb8e794f1d0cd3cdf25f23dfc9","static":{"gateway-shell.css":{"contentType":"text/css","sha256":"a6d4894610d409e94544757502926b7e778c51f253bdf6affdba8b5bc0a29afc"},"images/app-icon-maskable.png":{"contentType":"image/png","sha256":"f7fece25d75098842f0802ba30df6e798fe16a02d0f7c1caf57d0d2ca21c7678"},"images/app-icon.png":{"contentType":"image/png","sha256":"7a31959e2a67430983286c6f42427fb42be17e6b9794f3555d3c47a460127967"},"manifest.json":{"contentType":"application/json","sha256":"36b25dcc5b12882779c1d32a0eb58b7c4ace0624914cfe1169e9e58f8bcf02d1"}},"version":"production"};
+const GW_SHELL = {"bridgeSHA256":"0e8f58d1c477c85a94aa9a22f1bc78142e9941a2ca02047f8e2d0d59c08ed64b","engine":"f2c8c53907441dec40e8f1a43b55e395cd9bace5e304c10919d24f85a54a5d64","schema":1,"shellSHA256":"90f4dbf0b3ad914244ec7ec946ebf2977df9cdbb8e794f1d0cd3cdf25f23dfc9","static":{"gateway-shell.css":{"contentType":"text/css","sha256":"a6d4894610d409e94544757502926b7e778c51f253bdf6affdba8b5bc0a29afc"},"images/app-icon-maskable.png":{"contentType":"image/png","sha256":"f7fece25d75098842f0802ba30df6e798fe16a02d0f7c1caf57d0d2ca21c7678"},"images/app-icon.png":{"contentType":"image/png","sha256":"7a31959e2a67430983286c6f42427fb42be17e6b9794f3555d3c47a460127967"},"manifest.json":{"contentType":"application/json","sha256":"36b25dcc5b12882779c1d32a0eb58b7c4ace0624914cfe1169e9e58f8bcf02d1"}},"version":"production"};
 const GW = {protocol:1,db:'bis-gateway-1',prefix:'bis-gateway-1-',queue:Promise.resolve()};
 const gwURL = key => new URL(key,self.registration.scope).href;
 function gwDB(){return new Promise((resolve,reject)=>{const q=indexedDB.open(GW.db,1);q.onupgradeneeded=()=>q.result.createObjectStore('records');q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);});}
@@ -105,10 +105,10 @@ self.addEventListener('message',event=>{
 self.addEventListener('install',event=>{event.waitUntil(gwInstallShell());});
 // No skipWaiting,clients.claim or deletion of legacy/user data.
 self.addEventListener('activate',event=>{event.waitUntil(Promise.resolve());});
-function gwFailure(){return new Response('التطبيق متوقف. اقفل كل تبويبات الموقع ونوافذ التطبيق وافتحه من جديد.',{status:503,headers:{'Content-Type':'text/plain','Cache-Control':'no-store'}});}
+function gwFailure(){return new Response('التطبيق متوقف. اقفل كل تبويبات الموقع ونوافذ التطبيق وافتحه من جديد.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});}
 async function gwFetch(event,key){
  if(event.request.headers.has('range'))throw Error('range unsupported');
- const url=new URL(event.request.url);const root=key===''||url.pathname===new URL('index.html',self.registration.scope).pathname;
+ const url=new URL(event.request.url);const root=url.pathname===new URL(self.registration.scope).pathname||url.pathname===new URL('index.html',self.registration.scope).pathname;
  if(root&&url.searchParams.get('__gateway')!=='app'){
   return gwShellResponse('index.html','text/html');
  }
