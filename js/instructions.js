@@ -7,17 +7,7 @@
  *     (window.InstructionsModule.open/close + جذر ثابت في index.html)
  *   ▸ لا يُنشئ نسخة من الميزة: كل تعليمات مرتبطة بالميزة الأصلية عبر مفتاحها،
  *     والاسم والأيقونة تُقرأ حيّة من كارت الميزة في المنتدى (تتغير معه تلقائيًا)
- *   ▸ مجموعة Firestore: instructions/{featureKey}
- *       { featureKey, featureTitle, blocks:[{t:"h"|"p"|"img", v:string}],
- *         createdAt, updatedAt, updatedBy }
- *
- *   ▸ قواعد Firestore المطلوبة (أضفها في Rules — بدونها ستفشل الكتابة/القراءة):
- *
- *       match /instructions/{featureKey} {
- *         allow read: if isSignedIn();
- *         allow create, update, delete: if isOwner();
- *       }
- *     (أضفها قبل قاعدة match /{document=**} الأخيرة، بجوار militaryMaterials)
+ *   ▸ Content: Supabase via authenticated bliss-gateway, no Firestore fallback.
  * ══════════════════════════════════════════
  */
 
@@ -29,14 +19,6 @@
 
   window.InstructionsModule = window.InstructionsModule || {};
 
-  const _FB = "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  async function _getFS() {
-    const db = window.db;
-    if (!db) throw new Error("Firebase غير متاح");
-    return { db, ...(await import(_FB)) };
-  }
-
-  const COL           = "instructions";
   const MAX_IMG_MB    = 10;
   const MAX_BLOCKS    = 60;
   const MAX_TEXT      = 5000;
@@ -367,192 +349,69 @@
   });
 
 
-  /* ── بوابة بليس (المرحلة 2: كارت تجريبي) ──
-     القراءة من الـ Worker عندما يكون الوضع "gateway"، وأي فشل ← مستمع Firestore الحالي.
-     المزامنة بعد حفظ/حذف المالك لا تمنع العملية أبدًا (try/catch داخلي). */
-  const GW_URL      = "https://bliss-gateway.cairohbis.workers.dev";
-  const GW_CFG_TTL  = 60e3;   // الإعداد يُخزَّن في sessionStorage بحد أقصى 60 ثانية
-  const GW_RECHECK  = 10e3;   // حد أدنى بين إعادات التحقق التلقائية (يُستثنى ما بعد الحفظ)
-  const GW_TIMEOUT  = 5e3;    // مهلة طلبات البوابة (تشمل جلب التوكن؛ 5 ثوانٍ رأفة بالشبكات البطيئة — ملاحظة المالك أ)
-  const GW_DOWN_TTL = 60e3;   // قاطع الدائرة: بعد فشل البوابة يتخطّاها الكارت دقيقة واحدة (ملاحظة المالك ج)
-  let _gwAbort    = null;     // AbortController للطلب الحالي
-  let _gwInflight = null;     // وعد واحد في الطيران لكل كارت
-  let _gwEtag     = null;
-  let _gwLastFetch = 0;
-  let _gwVisBound = false;
-  let _gwMode     = null;     // "gateway" عندما يعمل مسار البوابة
-
+  /* Supabase authoritative content only. Identity remains Firebase Auth. */
+  const GW_URL = "https://bliss-gateway.cairohbis.workers.dev";
+  let _gwAbort=null, _gwMode="gateway", _fresh=false, _snapshotUid=null, _loadSeq=0;
   async function _gwToken() {
-    // getIdToken نفسها قد تعلّق بلا نهاية (ملاحظة المالك ب) ← سباق مع مهلة
-    return await Promise.race([
-      window.currentUser.getIdToken(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("token-timeout")), GW_TIMEOUT)),
-    ]);
+    let timer;try{return await Promise.race([window.currentUser.getIdToken(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('token-timeout')),5000);})]);}finally{clearTimeout(timer);}
   }
-
-  async function _gwConfig(trace = {}) {
-    try {
-      const c = JSON.parse(sessionStorage.getItem("gwCfg") || "null");
-      if (c && c.cards && Date.now() - c.at < GW_CFG_TTL) return c.cards;
-    } catch (_) {}
-    const ac = new AbortController();
-    const request = _capture.id(), started = _capClock();
-    let stage = "token", timedOut = false, jsonStarted = false;
-    const to = setTimeout(() => { timedOut = true; ac.abort(); }, GW_TIMEOUT);
-    try {
-      const token = await _gwToken(); stage = "config";
-      const r = await fetch(GW_URL + "/v1/config", { signal: ac.signal, headers: { Authorization: "Bearer " + token } });
-      _capHttp(r, "config", request, 1, started, trace.flow);
-      if (!r.ok) { trace.reason = "http"; trace.cause = request; trace.status = r.status; _gwTrip(request, "config"); return null; }
-      jsonStarted = true;
-      const j = await r.json();
-      if (j && j.v === 1 && j.data && j.data.cards) {
-        try { sessionStorage.setItem("gwCfg", JSON.stringify({ at: Date.now(), cards: j.data.cards })); } catch (_) {}
-        return j.data.cards;
-      }
-      trace.reason = "config_invalid"; trace.cause = request;
-    } catch (e) {
-      trace.reason = _capReason(e, stage, timedOut, jsonStarted); trace.cause = request;
-      _capture.event("attempt_error", { flow: trace.flow, request, stage, reason: trace.reason,
-        code: _capture.code(e?.code), elapsed_ms: _capClock() - started });
-      _gwTrip(request, "config");
+  async function _insRequest(path, body, signal) {
+    const token=await _gwToken();
+    const r=await fetch(GW_URL+path,{method:body?'POST':'GET',cache:'no-store',signal,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    if(!r.ok) {
+      let code;try{code=(await r.json()).error?.code;}catch(_){}
+      throw new Error(['revision-conflict','item-limit','card-size-limit'].includes(code)?code:'http-'+r.status);
     }
-    finally { clearTimeout(to); }
-    return null; // أي فشل أو مهلة ← firebase
+    return await r.json();
   }
-
-  // 2.8: لا يُعتمد ردّ البوابة إلا بغلاف سليم كامل، وإلا تُرفض البيانات
-  function _gwValidPayload(j, trace) {
-    const bad = reason => { if (trace) trace.reason = reason; return false; };
-    if (!j || j.v !== 1 || !j.meta || j.meta.complete !== true) return bad("payload_envelope");
-    if (!Array.isArray(j.data) || j.meta.count !== j.data.length) return bad("payload_count");
-    if (!j.meta.generatedAt || Date.now() - j.meta.generatedAt > 5 * 60e3) return bad("payload_age");
-    for (const d of j.data) {
-      if (!d || typeof d.featureKey !== "string" || typeof d.featureTitle !== "string" || !Array.isArray(d.blocks)) return bad("payload_item");
-      for (const b of d.blocks) if (!b || !["h", "p", "img"].includes(b.t) || typeof b.v !== "string") return bad("payload_block");
-    }
-    return true;
+  function _validInstructions(j) {
+    return j&&j.v===1&&j.meta?.complete===true&&j.meta.source==='supabase'&&Array.isArray(j.data)&&j.data.length<=200&&j.meta.count===j.data.length&&j.meta.expected_count===j.data.length&&j.data.every(d=>d&&typeof d.featureKey==='string'&&/^[A-Za-z0-9_-]{1,80}$/.test(d.featureKey)&&typeof d.featureTitle==='string'&&typeof d.revision==='string'&&Array.isArray(d.blocks)&&d.blocks.length<=60&&d.blocks.every(b=>b&&['h','p','img'].includes(b.t)&&typeof b.v==='string'))&&new Set(j.data.map(d=>d.featureKey)).size===j.data.length;
   }
-
-  function _gwIsOpen() { const r = _root(); return !!(r && r.classList.contains("instructions-open")); }
-
-  function _gwRenderFromDocs(source = "gateway", cause) {
-    if (!_gwIsOpen()) return; // الكارت أُغلق أثناء الطلب: لا رسم ولا بدء مستمع
-    if (_view === "list") _renderList();
-    else if (_view === "read") { if (_docs[_curKey]) _renderRead(); else _goList(); }
-    _capRender(source, cause);
+  function _gwIsOpen(){return !!_root()?.classList.contains("instructions-open");}
+  function _staleNotice() {
+    document.getElementById("insStaleNotice")?.remove();
+    const body=_body(); if(body)body.insertAdjacentHTML('afterbegin','<p id="insStaleNotice" role="status" class="ins-hint">نسخة سابقة للقراءة فقط. تعذّر تحديث Supabase. أغلق الكارت وافتحه للمحاولة.</p>');
   }
-
-  const GW_CARD = "instructions"; // مفتاح القاطع لكل كارت على حدة (ملاحظة المالك أ): فشل كارت لا يُسقط الباقي
-  function _gwTrip(cause, stage = "content") { _capture.event("breaker", { stage, flow: _capFlow, cause }); try { sessionStorage.setItem("gwDown:" + GW_CARD, String(Date.now())); } catch (_) {} }
-  function _gwDown() { try { const t = +sessionStorage.getItem("gwDown:" + GW_CARD) || 0; return t > 0 && Date.now() - t < GW_DOWN_TTL; } catch (_) { return false; } }
-  function _gwUp()   { try { sessionStorage.removeItem("gwDown:" + GW_CARD); } catch (_) {} }
-
-  function _gwToFirebase(reason, cause, details = {}) {
-    const fallback = _capture.event("fallback", { stage: "content", flow: _capFlow, reason, cause, ...details });
-    _gwTrip(fallback || cause); _gwMode = "firebase"; if (_gwIsOpen()) _fsStart(fallback);
+  function _renderCurrent() {
+    if(!_root()?.classList.contains('instructions-open'))return;
+    if(_view==='read'&&_docs[_curKey])_renderRead();else if(_view!=='edit')_renderList();
+    if(!_fresh)_staleNotice();
   }
-
-  async function _gwFetch(force) {
-    if (_gwInflight) return _gwInflight;
-    if (_gwDown()) return; // القاطع مفتوح: لا طلبات حتى انتهاء الدقيقة
-    if (!force && Date.now() - _gwLastFetch < GW_RECHECK) return;
-    _gwLastFetch = Date.now();
-    if (_gwAbort) _gwAbort.abort();
-    const ac = _gwAbort = new AbortController();
-    _gwInflight = (async () => {
-      for (let attempt = 0; attempt < 3; attempt++) { // إعادتان كحد أقصى، على 5xx/الشبكة فقط
-        let timedOut = false, stage = "token", jsonStarted = false, httpStatus = null;
-        const request = _capture.id(), flow = _capFlow, started = _capClock();
-        const to = setTimeout(() => { timedOut = true; ac.abort(); }, GW_TIMEOUT);
-        try {
-          // If-None-Match فقط إذا كانت النسخة المحلية موجودة فعلًا (close() يفرّغ _docs؛ وإلا أظهر 304 قائمة فارغة خطأً)
-          const hasLocal = Object.keys(_docs).length > 0;
-          const token = await _gwToken(); stage = "content";
-          const r = await fetch(GW_URL + "/v1/content/instructions", {
-            signal: ac.signal,
-            headers: { Authorization: "Bearer " + token, ...(_gwEtag && hasLocal ? { "If-None-Match": _gwEtag } : {}) },
-          });
-          httpStatus = r.status;
-          _capHttp(r, "content", request, attempt + 1, started, flow);
-          if (r.status === 304) { _gwUp(); _gwRenderFromDocs("gateway-memory", request); return; }
-          if (r.status === 503 || (r.status >= 400 && r.status < 500)) { _gwToFirebase("http", request, { status: r.status }); return; } // disabled أو 4xx: فورًا وبلا إعادة
-          if (!r.ok) throw new Error("gw-" + r.status);
-          jsonStarted = true;
-          const j = await r.json(), validation = {};
-          if (!_gwValidPayload(j, validation)) {
-            _gwToFirebase(validation.reason, request, { ...(typeof j?.meta?.generatedAt === "number" ? { age_ms: Date.now() - j.meta.generatedAt } : {}) }); return;
-          }
-          _gwUp();
-          _gwEtag = r.headers.get("ETag") || j.etag || _gwEtag;
-          _docs = {};
-          j.data.forEach(d => { _docs[d.featureKey] = { id: d.featureKey, ...d }; });
-          _gwRenderFromDocs("gateway", request);
-          return;
-        } catch (e) {
-          clearTimeout(to); // أول سطر في الـcatch (إصلاح مراجعة المالك): إيقاف مؤقّت المحاولة قبل أي انتظار حتى لا يُجهَض المتحكّم أثناء الـbackoff
-          if (e && e.name === "AbortError") {
-            if (timedOut) { _gwToFirebase("timeout", request); return; } // بوابة معلّقة: رجوع فوري بلا إعادة
-            _capture.event("cancel", { flow, request, stage, reason: "closed" });
-            return; // إلغاء عمدي (إغلاق الكارت أو إعادة فتحه)
-          }
-          const reason = httpStatus >= 400 ? "http" : _capReason(e, stage, timedOut, jsonStarted);
-          const cause = _capture.event("attempt_error", { flow, request, stage, reason,
-            ...(httpStatus !== null ? { status: httpStatus } : {}), code: _capture.code(e?.code), attempt: attempt + 1,
-            elapsed_ms: _capClock() - started });
-          if (attempt >= 2) { _gwToFirebase("retry_exhausted", cause || request); return; }
-          await new Promise(res => setTimeout(res, 1000 * (attempt + 1))); // تباعد متصاعد
-        } finally { clearTimeout(to); }
-      }
-    })();
-    try { await _gwInflight; } finally { _gwInflight = null; }
-  }
-
-  function _gwBindVisibility() {
-    if (_gwVisBound) return; _gwVisBound = true;
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible" && _gwMode === "gateway" && _root() && _root().classList.contains("instructions-open"))
-        _gwFetch(false);
-    });
-  }
-
-  // مزامنة بعد حفظ/حذف المالك — منفصلة تمامًا عن نجاح الحفظ نفسه
-  async function _gwSync(key) {
-    const request = _capture.id(), started = _capClock(), flow = _capFlow;
+  async function _gwFetch() {
+    const uid=window.currentUser?.uid,seq=++_loadSeq;
+    if(_snapshotUid!==uid){_docs={};_snapshotUid=uid;_fresh=false;if(_body())_body().innerHTML="";}
+    _fresh=false;
+    if(Object.keys(_docs).length)_renderCurrent();
+    if(_gwAbort)_gwAbort.abort();
+    const ac=_gwAbort=new AbortController(),to=setTimeout(()=>ac.abort(),10000);
     try {
-      const r = await fetch(GW_URL + "/v1/admin/sync/instructions", {
-        method: "POST",
-        signal: AbortSignal.timeout(15000),
-        headers: { Authorization: "Bearer " + (await _gwToken()), "Content-Type": "application/json" },
-        body: JSON.stringify({ key }),
-      });
-      _capHttp(r, "sync", request, 1, started, flow);
-      if (!r.ok) throw new Error("sync-" + r.status);
-      _gwPendingClear(key);
-    } catch (e) {
-      _capture.event("sync_error", { flow, request, stage: "sync", reason: /^sync-/.test(e?.message || "") ? "http" : "network_or_cors", code: _capture.code(e?.code) });
-      window.toast?.("تعثّرت المزامنة الاحتياطية — ستُعاد تلقائيًا عند فتح الكارت", "error");
-      _gwPendingAdd(key);
-    }
+      const j=await _insRequest('/v1/content/instructions',null,ac.signal);
+      if(seq!==_loadSeq||uid!==window.currentUser?.uid)return;
+      if(!_validInstructions(j))throw new Error('invalid-payload');
+      _docs=Object.fromEntries(j.data.map(d=>[d.featureKey,{...d,id:d.featureKey}]));_fresh=true;
+      _capture.event('source',{stage:'card',flow:_capFlow,mode:'gateway',source:'gateway'});
+      _renderCurrent();_capRender('gateway',null);
+      window.dispatchEvent(new Event("instructions-content-read"));
+    } catch(e) {
+      if(seq!==_loadSeq||uid!==window.currentUser?.uid)return;
+      _fresh=false;
+      if(Object.keys(_docs).length)_renderCurrent();else _fail();
+    }finally{clearTimeout(to);}
   }
-  function _gwPendingAdd(key) {
-    try {
-      const p = JSON.parse(localStorage.getItem("gwPendingSync") || "[]");
-      if (!p.includes(key)) { p.push(key); localStorage.setItem("gwPendingSync", JSON.stringify(p)); }
-    } catch (_) {}
-  }
-  function _gwPendingClear(key) {
-    try {
-      const p = JSON.parse(localStorage.getItem("gwPendingSync") || "[]").filter(k => k !== key);
-      localStorage.setItem("gwPendingSync", JSON.stringify(p));
-    } catch (_) {}
-  }
-  // المفاتيح المعلّقة تُعاد عند فتح المالك للكارت (2.3ب)
-  function _gwRetryPending() {
-    let p;
-    try { p = JSON.parse(localStorage.getItem("gwPendingSync") || "[]"); } catch (_) { p = []; }
-    if (!Array.isArray(p) || !p.length) return;
-    [...p].forEach(key => _gwSync(key));
+  let _insRefreshTimer=null;
+  function _stopRefresh(){if(_insRefreshTimer){clearInterval(_insRefreshTimer);_insRefreshTimer=null;}}
+  function _startRefresh(){_stopRefresh();if(document.visibilityState==='visible')_insRefreshTimer=setInterval(()=>{if(_gwIsOpen()&&document.visibilityState==='visible'&&_view!=='edit'&&!_busy)void _gwFetch();},60000);}
+  async function _startListener(){_startRefresh();return _gwFetch();}
+  document.addEventListener('visibilitychange',()=>{_stopRefresh();if(document.visibilityState==='visible'&&_gwIsOpen()){_startRefresh();if(_view!=='edit')void _gwFetch();}});
+  async function _mutate(action,key,extra={},expected=_docs[key]?.revision||null) {
+    if(!_fresh)throw new Error('stale');
+    ++_loadSeq;if(_gwAbort)_gwAbort.abort();
+    const uid=window.currentUser?.uid;
+    const j=await _insRequest('/v1/admin/content/instructions',{key,action,revision:expected,...extra},AbortSignal.timeout(15000));
+    if(uid!==window.currentUser?.uid)throw new Error('account-changed');
+    if(j?.meta?.source!=='supabase'||j.meta.complete!==true||!j.data)throw new Error('invalid-write-result');
+    if(action==='delete'){if(j.data.deleted!==true||j.data.key!==key)throw new Error('invalid-delete-result');delete _docs[key];}
+    else {if(j.data.featureKey!==key||typeof j.data.revision!=='string'||typeof j.data.featureTitle!=='string'||!Array.isArray(j.data.blocks)||j.data.blocks.some(b=>!b||!['h','p','img'].includes(b.t)||typeof b.v!=='string'))throw new Error('invalid-write-result');_docs[key]={...j.data,id:key};}
   }
 
   function _esc(s) {
@@ -619,47 +478,6 @@
     });
   }
 
-  async function _fsStart(cause) {
-    if (_unsub) return;
-    try {
-      const { db, collection, onSnapshot } = await _getFS();
-      _unsub = onSnapshot(collection(db, COL), snap => {
-        _docs = {};
-        snap.docs.forEach(d => { _docs[d.id] = { id: d.id, ...d.data() }; });
-        if (_view === "list") _renderList();
-        else if (_view === "read") { if (_docs[_curKey]) _renderRead(); else _goList(); }
-        _capRender(typeof snap.metadata?.fromCache === "boolean" ? (snap.metadata.fromCache ? "firebase-cache" : "firebase-server") : "firebase-unknown", cause);
-      }, e => {
-        _capture.event("firestore_error", { stage: "firestore-listen", flow: _capFlow, code: _capture.code(e?.code) }); _fail();
-      });
-    } catch (e) {
-      _capture.event("firestore_error", { stage: "firestore-init", flow: _capFlow, code: _capture.code(e?.code) }); _fail();
-    }
-  }
-
-  async function _startListener() {
-    if (_unsub) return;
-    if (_gwDown()) {
-      const cause = _capture.breakerCause;
-      const fallback = _capture.event("fallback", { stage: "card", flow: _capFlow, reason: cause ? "breaker_open" : "breaker_preexisting_unknown", cause });
-      _gwMode = "firebase"; _fsStart(fallback); return;
-    } // قاطع الدائرة مفتوح: بلا حتى طلب إعداد
-    const trace = { flow: _capFlow };
-    const cards = await _gwConfig(trace); // null أو غياب المفتاح ← firebase
-    if (!_gwIsOpen()) return;      // أُغلق الكارت أثناء جلب الإعداد: لا مستمع
-    const mode = (cards && cards.instructions) || "firebase";
-    _gwMode = mode;
-    if (mode === "gateway") {
-      _capture.event("source", { stage: "card", flow: trace.flow, mode, source: "gateway" });
-      _gwBindVisibility();
-      await _gwFetch(true); // عند أي فشل يستدعي _gwToFirebase() داخليًا
-      return;
-    }
-    const fallback = trace.reason ? _capture.event("fallback", { stage: "config", flow: trace.flow, reason: trace.reason, cause: trace.cause, status: trace.status }) : null;
-    _capture.event("source", { stage: "card", flow: trace.flow, mode, source: "firebase-unknown",
-      ...(!fallback ? { reason: mode === "shadow" ? "mode_shadow" : mode === "firebase" ? "mode_firebase" : "unknown" } : { cause: fallback }) });
-    _fsStart(fallback); // firebase وshadow: السلوك الحالي كما هو
-  }
   function _fail() {
     const b = _body();
     if (b) b.innerHTML = `<div class="ins-empty"><div class="ins-empty-title">تعذّر تحميل التعليمات</div></div>`;
@@ -701,12 +519,13 @@
     const t = document.getElementById("insTitleText");
     if (t) t.textContent = title;
     const a = document.getElementById("insAddBtn");
-    if (a) a.style.display = (showAdd && _isOwnerUser()) ? "" : "none";
+    if (a) a.style.display = (showAdd && _isOwnerUser() && _fresh) ? "" : "none";
   }
 
   function _goList() {
     _view = "list"; _curKey = null; _draft = null;
     _renderList();
+    if(!_fresh)_staleNotice();
   }
 
   /* ─────────────────────────────────────────
@@ -717,7 +536,7 @@
     _setHeader("تعليمات", true);
     const body = _body();
     if (!body) return;
-    const owner = _isOwnerUser();
+    const owner = _isOwnerUser() && _fresh;
     const list = _sortedDocs();
 
     if (!list.length) {
@@ -762,6 +581,7 @@
     if (!_docs[key]) return;
     _view = "read"; _curKey = key;
     _renderRead();
+    if(!_fresh)_staleNotice();
   };
 
   function _renderRead() {
@@ -791,10 +611,11 @@
      المحرر (المالك فقط)
   ───────────────────────────────────────── */
   window.InstructionsModule._openEditor = function (key) {
-    if (!_isOwnerUser()) return;
+    if (!_isOwnerUser() || !_fresh) return;
     const existing = key && _docs[key];
     _draft = {
       key: key || null,
+      revision: existing?.revision || null,
       blocks: existing ? JSON.parse(JSON.stringify(existing.blocks || [])) : [],
       isNew: !existing,
       dirty: false
@@ -885,6 +706,7 @@
       _draft.isNew = true;
     }
     _draft.key = key;
+    _draft.revision = _docs[key]?.revision || null;
     document.querySelectorAll("#insPick .ins-pick").forEach(el => el.classList.toggle("selected", el.getAttribute("data-k") === key));
     _renderBlocks();
   };
@@ -956,7 +778,7 @@
   };
 
   window.InstructionsModule._save = async function () {
-    if (!_isOwnerUser() || !_draft || _busy) return;
+    if (!_isOwnerUser() || !_fresh || !_draft || _busy) return;
     if (!_draft.key) { window.toast?.("اختر الميزة أولاً", "error"); return; }
     const blocks = _draft.blocks
       .map(b => ({ t: b.t, v: (b.v || "").trim() }))
@@ -967,26 +789,15 @@
     const f = _featureByKey(_draft.key);
     const btn = document.getElementById("insSaveBtn");
     if (btn) btn.disabled = true;
+    _busy=true;
     try {
-      const { db, doc, setDoc, serverTimestamp } = await _getFS();
-      const payload = {
-        featureKey:   _draft.key,
-        featureTitle: f ? f.title : (_docs[_draft.key]?.featureTitle || ""),
-        blocks,
-        updatedAt:    serverTimestamp(),
-        updatedBy:    window.currentUser?.uid || ""
-      };
-      if (!_docs[_draft.key]) payload.createdAt = serverTimestamp();
-      try { await setDoc(doc(db, COL, _draft.key), payload, { merge: true }); }
-      catch (e) { _capture.event("firestore_error", { stage: "firestore-save", flow: _capFlow, code: _capture.code(e?.code) }); throw e; }
-      await _gwSync(_draft.key);            // زر الحفظ معطّل أثناءها؛ لا تمنع الحفظ عند فشلها
-      if (_gwMode === "gateway") await _gwFetch(true);
+      await _mutate('save',_draft.key,{featureTitle:f?f.title:(_docs[_draft.key]?.featureTitle||""),blocks},_draft.revision);
       window.toast?.("تم الحفظ ✓");
       _goList();
     } catch (e) {
-      window.toast?.("فشل الحفظ", "error");
+      window.toast?.(e.message === "revision-conflict" ? "تغيّرت التعليمات من جلسة أخرى. أغلق الكارت وافتحه قبل التعديل." : ["item-limit","card-size-limit"].includes(e.message) ? "وصلت التعليمات للحد المسموح. قلّل المحتوى ثم أعد المحاولة." : "فشل الحفظ", "error");
       if (btn) btn.disabled = false;
-    }
+    } finally { _busy=false; }
   };
 
   window.InstructionsModule._cancelEdit = function () {
@@ -995,17 +806,16 @@
   };
 
   window.InstructionsModule._delete = async function (key) {
-    if (!_isOwnerUser()) return;
+    if (!_isOwnerUser() || !_fresh || _busy) return;
     if (!window.confirm("حذف تعليمات هذه الميزة نهائيًا؟\n(الميزة نفسها لا تتأثر، والصور تبقى على Cloudinary)")) return;
+    _busy=true;
     try {
-      const { db, doc, deleteDoc } = await _getFS();
-      try { await deleteDoc(doc(db, COL, key)); }
-      catch (e) { _capture.event("firestore_error", { stage: "firestore-delete", flow: _capFlow, code: _capture.code(e?.code) }); throw e; }
-      await _gwSync(key);                   // حذف ناعم في Supabase؛ لا يمنع الحذف عند فشلها
+      await _mutate('delete',key);
+      _goList();
       window.toast?.("تم الحذف");
     } catch (e) {
-      window.toast?.("فشل الحذف", "error");
-    }
+      window.toast?.(e.message === "revision-conflict" ? "تغيّرت التعليمات من جلسة أخرى. حدّث الكارت قبل الحذف." : "فشل الحذف", "error");
+    } finally { _busy=false; }
   };
 
   /* ─────────────────────────────────────────
@@ -1023,12 +833,13 @@
     _capFlow = _capture.id(); _capOpenedAt = _capClock(); _capRendered = false;
     void _capture.resume();
     _capture.event("card_open", { stage: "card", flow: _capFlow, visible: document.visibilityState === "visible" });
+    _fresh=false;
     _view = "list"; _curKey = null; _draft = null; _busy = false;
     root.classList.add("instructions-open");
     root.style.display = "flex";
     _buildShell();
+    _fresh=false;
     _setHeader("تعليمات", true);
-    if (_isOwnerUser()) _gwRetryPending();
     _startListener();
   };
 
@@ -1041,7 +852,8 @@
     root.innerHTML = "";
     if (_unsub) { _unsub(); _unsub = null; }
     if (_gwAbort) { _gwAbort.abort(); _gwAbort = null; }
-    _docs = {}; _draft = null; _view = "list"; _curKey = null;
+    _stopRefresh();
+    ++_loadSeq; _fresh=false; _draft = null; _view = "list"; _curKey = null;
   };
 
 })();

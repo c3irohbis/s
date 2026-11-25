@@ -190,6 +190,7 @@
   }
 
   async function _countUnread(src) {
+    if(src.key === "instructions")return _instructionsBadge(false);
     const lastSeen = await _lastSeen(src.key);
     if (src.kind === "singleDoc") {
       const snap = await _fs.getDoc(_fs.doc(_db, src.col, _worldId));
@@ -226,6 +227,7 @@
   }
 
   function _evaluate(src, stamp) {
+    if(src.key === "instructions")return;
     _lastStamp[src.key] = stamp;
     if (_verified[src.key] === stamp) return;
     const st = _st[src.key];
@@ -313,6 +315,7 @@
   async function _markRead(key) {
     const src = SOURCES.find((s) => s.key === key);
     if (!src || !_fs || !_uid) return;
+    if(key === "instructions"){try{await _instructionsBadge(true);}catch(_){}return;}
     // كارت مؤكَّد إنه نظيف (بدون شارة وبصمته متحقق منها) → مفيش حاجة تتسجّل ولا كتابة
     const hadBadge = (_counts[key] || 0) > 0;
     const cleanKnown = _scope(src)
@@ -367,8 +370,25 @@
     });
   }
 
+  async function _instructionsBadge(mark) {
+    const uid=_uid,gen=_gen,token=await window.currentUser.getIdToken();
+    const r=await fetch('https://bliss-gateway.cairohbis.workers.dev/v1/content/instructions/'+(mark?'read':'badge'),{method:mark?'POST':'GET',cache:'no-store',signal:AbortSignal.timeout(10000),headers:{Authorization:'Bearer '+token}});
+    if(!r.ok)throw Error('instructions-badge');const j=await r.json();
+    if(uid!==_uid||gen!==_gen)return 0;
+    if(j.meta?.complete!==true||j.meta?.source!=='supabase'||!Number.isInteger(j.data?.count)||j.data.count<0)throw Error('instructions-badge-payload');
+    _counts.instructions=j.data.count;_renderAll();return j.data.count;
+  }
+  let _instructionsBadgeTimer=null;
+  async function _pollInstructionsBadge(){
+    if(_instructionsBadgeTimer)clearTimeout(_instructionsBadgeTimer);
+    if(!_sig||document.visibilityState!=='visible')return;
+    try{await _instructionsBadge(false);}catch(_){}
+    if(_sig&&document.visibilityState==='visible')_instructionsBadgeTimer=setTimeout(_pollInstructionsBadge,60000);
+  }
+  window.addEventListener('instructions-content-read',()=>{if(_uid)void _instructionsBadge(true).catch(()=>{});});
   function _teardown() {
     _gen++;
+    if(_instructionsBadgeTimer)clearTimeout(_instructionsBadgeTimer);
     Object.keys(_unsubs).forEach((k) => { try { _unsubs[k](); } catch (e) { /* تجاهل */ } delete _unsubs[k]; });
     [_counts, _verified, _lastStamp, _vt, _marking, _st, _ready, _deferred].forEach((o) => { Object.keys(o).forEach((k) => { delete o[k]; }); });
     _renderAll();
@@ -405,13 +425,15 @@
       _loadState();
       _watchGate("world");
       _watchGate("global");
+      void _pollInstructionsBadge();
       SOURCES.filter((s) => !_scope(s)).forEach(_watchGrades);
     }
     _next(); // مراقبة تغيّر الحساب/العالم (تتوقف والتبويب في الخلفية وتكمّل عند الرجوع)
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible") return;
+    if (document.visibilityState !== "visible"){if(_instructionsBadgeTimer)clearTimeout(_instructionsBadgeTimer);return;}
+    void _pollInstructionsBadge();
     if (_paused) { _paused = false; _boot(); }
     _flushDeferred();
   });

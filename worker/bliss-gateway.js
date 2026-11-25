@@ -25,7 +25,7 @@
 const V = 1;
 // الكروت المعروفة (مفاتيح forum-badges). الافتراضي لأي كارت: firebase
 const CARD_KEYS = ["news","lectures","exams","sections","studySchedule","sheets","records","lostFound","military","instructions","tuition"];
-const VALID_MODES = new Set(["firebase","shadow","gateway"]);
+const VALID_MODES = new Set(["firebase","shadow","gateway","supabase"]);
 const OWNER_PREVIEW = "gateway-owner"; // قيمة KV: بوابة للمالك فقط، وshadow للباقين (تدرّج 2.5)
 
 /* ── أدوات base64url ── */
@@ -125,7 +125,7 @@ async function readFlags(env) {
     try { raw = JSON.parse(env.FLAGS_DEFAULT || "{}"); } catch (_) { raw = {}; }
   }
   const cards = {};
-  for (const k of CARD_KEYS) cards[k] = (VALID_MODES.has(raw[k]) || raw[k] === OWNER_PREVIEW) ? raw[k] : "firebase";
+  for (const k of CARD_KEYS) cards[k] = (VALID_MODES.has(raw[k]) || raw[k] === OWNER_PREVIEW || raw[k] === "supabase-owner") ? raw[k] : "firebase";
   return cards;
 }
 
@@ -300,11 +300,71 @@ function rowToClient(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
+    revision: row.content_hash || null,
   };
+}
+
+/* Instructions badge and per-user read marker also live only in Supabase. */
+async function handleInstructionBadge(request,env,user,mark) {
+  const mode=(await readFlags(env)).instructions;
+  if(!(mode==='supabase'||mode==='supabase-owner'&&user.sub===env.OWNER_UID))return err(request,env,503,'disabled');
+  const result=await sb(env,'/rpc/instruction_badge',{method:'POST',body:{p_uid:user.sub,p_mark:mark}});
+  if(!result.ok||!Number.isInteger(result.data?.count))return err(request,env,502,'supabase_error');
+  return ok(request,env,result.data,{complete:true,source:'supabase'},{'Cache-Control':'no-store'});
+}
+
+/* Authoritative instructions: no Firestore, no edge cache, no legacy sync state. */
+async function handleAuthoritativeInstructionsRead(request, env) {
+  const r = await sbGetInstructions(env);
+  if (!r.ok) return err(request, env, 502, "supabase_error");
+  if (r.rows.length > INSTR.MAX_ITEMS) return err(request, env, 502, "too_large");
+  const items = r.rows.map(rowToClient);
+  const etag = '"isa-' + (await sha256hex(JSON.stringify(items))).slice(0,24) + '"';
+  const body = {v:V,data:items,etag,ts:Date.now(),meta:{complete:true,count:items.length,expected_count:items.length,version:V,generatedAt:Date.now(),etag,source:"supabase"}};
+  if (new TextEncoder().encode(JSON.stringify(body)).length > INSTR.MAX_RESP_BYTES) return err(request,env,502,"too_large");
+  return new Response(JSON.stringify(body),{headers:{"Content-Type":"application/json","Cache-Control":"no-store",...corsHeaders(request,env),"X-Content-Type-Options":"nosniff"}});
+}
+async function handleAuthoritativeInstructionsWrite(request, env, user) {
+  if (!["supabase","supabase-owner"].includes((await readFlags(env)).instructions)) return err(request,env,503,"disabled");
+  if (Number(request.headers.get("Content-Length")) > 65536) return err(request,env,413,"too_large");
+  const reader=request.body?.getReader(); if(!reader)return err(request,env,400,"invalid-json");
+  const chunks=[];let size=0;
+  let timer;
+  try {
+    await Promise.race([(async()=>{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>65536){await reader.cancel();throw new Error('too_large');}chunks.push(value);}})(),new Promise((_,reject)=>{timer=setTimeout(()=>{reader.cancel().catch(()=>{});reject(new Error('body_timeout'));},10000);})]);
+  } catch(e){try{await reader.cancel();}catch(_){}return err(request,env,e.message==='too_large'?413:408,e.message==='too_large'?'too_large':'body_timeout');}
+  finally{clearTimeout(timer);reader.releaseLock();}
+  const bytes=new Uint8Array(size);let at=0;for(const x of chunks){bytes.set(x,at);at+=x.length;}
+  let raw;try{raw = new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch(_){return err(request,env,400,"invalid-utf8");}
+  let b; try { b=JSON.parse(raw); } catch (_) {return err(request,env,400,"invalid-json");}
+  const keys=["key","action","featureTitle","blocks","revision"];
+  if (!b || typeof b!=="object" || Array.isArray(b) || Object.keys(b).some(k=>!keys.includes(k)) || !/^[A-Za-z0-9_-]{1,80}$/.test(b.key||"") || !["save","delete"].includes(b.action) || !(b.revision===null || typeof b.revision==="string"&&b.revision.length<=128)) return err(request,env,400,"invalid-input");
+  if(b.action==="save") {
+    if(typeof b.featureTitle!=="string" || b.featureTitle.length>200 || !Array.isArray(b.blocks) || !b.blocks.length || b.blocks.length>60) return err(request,env,400,"invalid-input");
+    for(const x of b.blocks) {
+      if(!x || typeof x!=="object" || Object.keys(x).some(k=>!['t','v'].includes(k)) || !['h','p','img'].includes(x.t) || typeof x.v!=="string" || !x.v.trim() || x.v.length>5000) return err(request,env,400,"bad-block");
+      if(x.t==='img') {try {const u=new URL(x.v);if(u.protocol!=="https:"||u.hostname!=="res.cloudinary.com"||u.username||u.password||u.port)throw 0;}catch(_){return err(request,env,400,"bad-image-url");}}
+    }
+  }
+  const r=await sb(env,"/rpc/mutate_instruction_authoritative",{method:"POST",body:{p_key:b.key,p_action:b.action,p_title:b.featureTitle||"",p_blocks:b.blocks||[],p_expected:b.revision,p_uid:user.sub}});
+  if(!r.ok) {
+    if(r.data?.code==='P0001' && r.data.message==='revision-conflict') {
+      // An identical write retried after a lost response is a successful no-op.
+      if(b.action==='save') {
+        const now=await sbGetInstructions(env); const row=now.ok&&now.rows.find(x=>x.feature_key===b.key);
+        if(row&&row.feature_title===b.featureTitle&&JSON.stringify(row.blocks)===JSON.stringify(b.blocks)) return ok(request,env,rowToClient(row),{complete:true,source:'supabase'},{'Cache-Control':'no-store'});
+      }
+      return err(request,env,409,'revision-conflict');
+    }
+    if(r.data?.code==='P0001'&&['item-limit','card-size-limit'].includes(r.data.message))return err(request,env,409,r.data.message);
+    return err(request,env,502,'supabase_error');
+  }
+  return ok(request,env,b.action==='delete'?r.data:rowToClient(r.data),{complete:true,source:'supabase'},{'Cache-Control':'no-store'});
 }
 
 /* مسار القراءة: GET /v1/content/instructions */
 async function handleInstructionsContent(request, env, user, cards) {
+  if (cards.instructions === "supabase" || (cards.instructions === "supabase-owner" && user.sub === env.OWNER_UID)) return handleAuthoritativeInstructionsRead(request, env);
   // 2.7/4: الكارت لازم يكون gateway (أو gateway-owner مع طالب هو المالك) وإلا 503 disabled
   const allowed = cards.instructions === "gateway" || (cards.instructions === "gateway-owner" && user.sub === env.OWNER_UID);
   if (!allowed) return err(request, env, 503, "disabled");
@@ -1048,7 +1108,7 @@ export default {
     if (isHealth) return ok(request, env, { ok: true }, { complete: true, count: 0, generatedAt: Date.now() }, { "Cache-Control": "no-store" });
 
     const ROUTES = {
-      "POST /v1/media/upload": 1, "GET /v1/config": 1, "GET /v1/content/instructions": 1,
+      "GET /v1/content/instructions/badge":1,"POST /v1/content/instructions/read":1,"POST /v1/admin/content/instructions": 1, "POST /v1/media/upload": 1, "GET /v1/config": 1, "GET /v1/content/instructions": 1,
       "POST /v1/admin/sync/instructions": 1, "GET /v1/admin/reconcile/instructions": 1,
       "POST /v1/admin/reconcile/instructions/fix": 1, "GET /v1/admin/shadow/instructions": 1,
     };
@@ -1084,6 +1144,8 @@ export default {
     if (isAdmin) {
       if (user.sub !== env.OWNER_UID) return err(request, env, 403, "owner-only");
       if (!rateLimit("adm:" + user.sub, 60)) return err(request, env, 429, "rate-limited");
+      if (routeKey === "POST /v1/admin/content/instructions") return handleAuthoritativeInstructionsWrite(request,env,user);
+      if (url.pathname.includes("instructions") && ["supabase","supabase-owner"].includes((await readFlags(env)).instructions)) return err(request,env,410,"legacy-instructions-disabled");
       if (routeKey === "POST /v1/admin/sync/instructions") return handleSync(request, env, user);
       if (routeKey === "GET /v1/admin/reconcile/instructions") return handleReconcile(request, env, user);
       if (routeKey === "POST /v1/admin/reconcile/instructions/fix") return handleReconcileFix(request, env, user);
@@ -1094,6 +1156,8 @@ export default {
       if (cardRoute && cardRoute.op === "shadow") return handleCardShadow(request, env, user, cardRoute.card);
     }
 
+    if(routeKey==='GET /v1/content/instructions/badge')return handleInstructionBadge(request,env,user,false);
+    if(routeKey==='POST /v1/content/instructions/read')return handleInstructionBadge(request,env,user,true);
     if (routeKey === "POST /v1/media/upload") return handleMediaUpload(request, env, user);
     const cards = await readFlags(env);
 
@@ -1104,6 +1168,7 @@ export default {
     // تدرّج 2.5: قيمة gateway-owner تظهر "gateway" للمالك و"shadow" لغيره (بلا تغيير كود بين الخطوتين 3 و4)
     const view = { ...cards };
     for (const k of CARD_KEYS) if (view[k] === OWNER_PREVIEW) view[k] = (user.sub === env.OWNER_UID) ? "gateway" : "shadow";
+    if(view.instructions === "supabase-owner") view.instructions = user.sub === env.OWNER_UID ? "supabase" : "shadow";
     // ETag لحالة المجموعة + دعم If-None-Match ← 304 (لكل مستخدم: البصمة تشمل هوية المالك)
     const etag = '"cfg-' + (await sha256hex(JSON.stringify(view) + (user.sub === env.OWNER_UID ? ":o" : ""))).slice(0, 24) + '"';
     const cacheH = { "Cache-Control": "max-age=60", "ETag": etag };
