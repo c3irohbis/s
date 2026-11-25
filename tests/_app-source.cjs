@@ -10,5 +10,8 @@ const root=path.join(repo,base.pathname.slice(3));
 const entry=fs.readFileSync(path.join(root,'js/app-main.js'),'utf8');
 const mods=[...entry.matchAll(/import\s+"\.\/(app\/[^"]+)"/g)].map(m=>m[1].split('?')[0]);
 const parts={ 'js/app-main.js':entry };
-for(const m of mods)parts['js/'+m]=fs.readFileSync(path.join(root,'js',m),'utf8');
+const mapTag=/<script\b[^>]*type="importmap"[^>]*>([\s\S]*?)<\/script>/.exec(served);
+const imports=JSON.parse(mapTag[1]).imports;
+const mapped=new Map(Object.entries(imports).map(([k,v])=>[new URL(k,base).href,new URL(v,base).href]));
+for(const m of mods){const url=mapped.get(new URL('js/'+m,base).href)||new URL('js/'+m,base).href;const target=new URL(url);if(target.origin!=='https://test'||!target.pathname.startsWith('/s/'))throw Error('external app module unsupported');parts['js/'+m]=fs.readFileSync(path.join(repo,target.pathname.slice(3)),'utf8');}
 module.exports={source:Object.values(parts).join('\n'),parts,mods,root};
