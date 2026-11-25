@@ -3,6 +3,7 @@ const src=fs.readFileSync(path.join(__dirname,'../js/call-history.js'),'utf8');
 
 /* بيئة متصفح مصغّرة: العناصر كائنات خفيفة تكفي لمسارات الكاش والعرض */
 function makeEnv(uid){
+  const NativeDate=Date;class TestDate extends NativeDate {constructor(...args){super(...(args.length?args:['2026-11-23T12:00:00Z']));}static now(){return NativeDate.parse('2026-11-23T12:00:00Z');}}
   const store={};
   const els=[];
   function el(){const e={children:[],attrs:{},style:{},className:'',_html:'',
@@ -11,7 +12,7 @@ function makeEnv(uid){
     querySelector(){return null;},querySelectorAll(){return [];},
     closest(){return null;},remove(){}};Object.defineProperty(e,'innerHTML',{get(){return e._html;},set(v){e._html=v;}});els.push(e);return e;}
   const ctx={
-    console,JSON,Date,Math,Promise,Array,Object,String,Number,RegExp,Error,encodeURIComponent,parseInt,isNaN,Date,
+    console,JSON,Date,Math,Promise,Array,Object,String,Number,RegExp,Error,encodeURIComponent,parseInt,isNaN,Date:TestDate,
     setTimeout:()=>0,setInterval:()=>0,clearTimeout:()=>{},clearInterval:()=>{},
     localStorage:{getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=String(v);},removeItem:k=>{delete store[k];}},
     document:{readyState:'complete',createElement:el,getElementById:()=>null,addEventListener(){},
