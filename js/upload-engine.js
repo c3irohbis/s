@@ -1,46 +1,13 @@
+import { uploadMedia } from './media-upload.js';
 /* ══════════════════════════════════════════
    js/upload-engine.js — محرك الرفع + بطاقة الرفع
    منقول من index.html بدون أي تغيير في المنطق —
    القسم ده مستقل تماماً (صفر اعتماد على db/auth/currentUser/toast).
 ══════════════════════════════════════════ */
-function uploadToCloudinaryWithProgress(file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", "university_upload");
-    const xhr = new XMLHttpRequest();
-    let startTime = Date.now();
-    let lastLoaded = 0;
-    let lastTime = startTime;
-
-    xhr.upload.addEventListener("progress", (e) => {
-      if (!e.lengthComputable) return;
-      const now = Date.now();
-      const dt = (now - lastTime) / 1000;
-      const dl = e.loaded - lastLoaded;
-      const speed = dt > 0 ? dl / dt : 0;
-      lastLoaded = e.loaded;
-      lastTime = now;
-      const pct = Math.round((e.loaded / e.total) * 100);
-      const remaining = speed > 0 ? (e.total - e.loaded) / speed : null;
-      onProgress({ pct, loaded: e.loaded, total: e.total, speed, remaining, phase: "uploading" });
-    });
-
-    xhr.addEventListener("load", () => {
-      onProgress({ pct: 100, phase: "processing" });
-      try {
-        const data = JSON.parse(xhr.responseText);
-        if (!data.secure_url) { reject(new Error("Upload failed")); return; }
-        const isPDF = file.type === "application/pdf" || file.name.endsWith(".pdf");
-        const url = isPDF ? data.secure_url.replace("/image/upload/", "/raw/upload/") : data.secure_url;
-        resolve({ url, data });
-      } catch(e) { reject(e); }
-    });
-    xhr.addEventListener("error", () => reject(new Error("Network error")));
-    xhr.addEventListener("abort", () => reject(new Error("Aborted")));
-    xhr.open("POST", "https://api.cloudinary.com/v1_1/dnbvvfita/auto/upload");
-    xhr.send(formData);
-  });
+async function uploadToCloudinaryWithProgress(file, onProgress) {
+ let lastLoaded=0,lastTime=Date.now();
+ const data=await uploadMedia(file,p=>{const now=Date.now(),dt=(now-lastTime)/1000;const speed=dt>0?((p.loaded||file.size)-lastLoaded)/dt:0;lastLoaded=p.loaded||file.size;lastTime=now;onProgress({...p,speed,remaining:speed>0?(file.size-lastLoaded)/speed:null});});
+ return {url:data.secure_url,data};
 }
 
 function _getFileCategory(file) {

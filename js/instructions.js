@@ -37,11 +37,335 @@
   }
 
   const COL           = "instructions";
-  const CLOUD_NAME    = "dnbvvfita";
-  const UPLOAD_PRESET = "university_upload";
   const MAX_IMG_MB    = 10;
   const MAX_BLOCKS    = 60;
   const MAX_TEXT      = 5000;
+
+  /* Temporary, local-only instructions diagnostics. No transport/SDK interception. */
+  const CAP_BUILD = "instructions-capture-2";
+  const CAP_DB = "bliss-instructions-capture-v1";
+  const CAP_DAY = 86400000;
+  let _capFlow = null, _capOpenedAt = 0, _capRendered = false, _capStarting = null;
+  const _capClock = () => performance.now();
+  const _capture = (() => {
+    const TYPES = new Set(["capture_started", "capture_stopped", "card_open", "card_close", "request", "http_detail", "attempt_error", "firestore_error", "sync_error", "fallback", "source", "render_call_completed", "breaker", "cancel", "visibility"]);
+    const REASONS = new Set(["http", "code_unavailable", "timeout", "token_timeout", "auth_error", "network_or_cors", "json_invalid", "config_invalid", "payload_envelope", "payload_incomplete", "payload_count", "payload_age", "payload_item", "payload_block", "retry_exhausted", "breaker_open", "breaker_preexisting_unknown", "mode_firebase", "mode_shadow", "closed", "superseded", "revalidated", "snapshot", "unknown"]);
+    const CODES = new Set(["supabase_error", "empty_unexpected", "too_large", "disabled", "owner-only", "invalid-token", "missing-token", "rate-limited", "origin-not-allowed", "bad-json", "permission-denied", "unavailable", "resource-exhausted", "failed-precondition", "unauthenticated", "cancelled", "deadline-exceeded", "internal", "aborted", "data-loss", "invalid-argument", "not-found", "already-exists", "out-of-range", "unimplemented", "unknown", "auth/network-request-failed", "auth/user-token-expired", "auth/invalid-user-token"]);
+    const STAGES = new Set(["card", "config", "content", "token", "sync", "firestore-init", "firestore-listen", "firestore-save", "firestore-delete"]);
+    const SOURCES = new Set(["gateway", "gateway-memory", "firebase-cache", "firebase-server", "firebase-unknown"]);
+    const MODES = new Set(["gateway", "firebase", "shadow", "unknown"]);
+    const prefix = (window.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)).replace(/[^a-z0-9-]/gi, "");
+    let seq = 0, db = null, meta = null, health = "off", queue = Promise.resolve();
+    // Memory-only warning, not durable across tab close/crash or reload.
+    let lifecycle = 0, actions = Promise.resolve(), unconfirmedLossSession = null;
+    const action = work => { const next = actions.then(work); actions = next.catch(() => {}); return next; };
+    let releaseLock = null, lockTask = null, gate = false, epoch = null, mutating = false, breakerCause = null;
+    const unsettled = new Set();
+    const anchor = { wall: Date.now(), mono: _capClock() };
+    const id = () => prefix + "-" + (++seq);
+    const number = v => typeof v === "number" && Number.isFinite(v);
+    const safeId = v => typeof v === "string" && /^[a-z0-9_-]{1,96}$/i.test(v);
+    const eligibility = () => { try { return window.__insCaptureAuth?.getEligibility() || { eligible: false }; } catch (_) { return { eligible: false }; } };
+    const owner = () => eligibility().eligible === true && _isOwnerUser();
+    const current = () => owner() && eligibility().epoch === epoch;
+    function clean(type, fields = {}, timestamp = Date.now(), eventId = id()) {
+      if (!TYPES.has(type) || !safeId(eventId) || !number(timestamp)) return null;
+      const e = { id: eventId, type, at: timestamp };
+      for (const key of ["flow", "request", "cause"]) if (safeId(fields[key])) e[key] = fields[key];
+      for (const [key, allowed] of [["reason", REASONS], ["code", CODES], ["stage", STAGES], ["source", SOURCES], ["mode", MODES]])
+        if (allowed.has(fields[key])) e[key] = fields[key];
+      for (const key of ["elapsed_ms", "age_ms"])
+        if (number(fields[key])) e[key] = Math.round(Math.max(-1e12, Math.min(1e12, fields[key])));
+      if (Number.isInteger(fields.ordinal) && fields.ordinal > 0 && fields.ordinal <= 2000) e.ordinal = fields.ordinal;
+      if (Number.isInteger(fields.status) && fields.status >= 0 && fields.status <= 599) e.status = fields.status;
+      if (Number.isInteger(fields.attempt) && fields.attempt >= 0 && fields.attempt <= 3) e.attempt = fields.attempt;
+      for (const key of ["first", "visible"]) if (typeof fields[key] === "boolean") e[key] = fields[key];
+      return e;
+    }
+    function bounded(promise, ms = 2000) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("capture-timeout")), ms);
+        promise.then(v => { clearTimeout(timer); resolve(v); }, e => { clearTimeout(timer); reject(e); });
+      });
+    }
+    async function openDb() {
+      if (db) return db;
+      if (!window.indexedDB && typeof indexedDB === "undefined") throw new Error("capture-unavailable");
+      return new Promise((resolve, reject) => {
+        let expired = false;
+        const timer = setTimeout(() => { expired = true; reject(new Error("capture-timeout")); }, 2000);
+        const r = indexedDB.open(CAP_DB, 1);
+        r.onupgradeneeded = () => {
+          if (!r.result.objectStoreNames.contains("meta")) r.result.createObjectStore("meta", { keyPath: "key" });
+          if (!r.result.objectStoreNames.contains("events")) r.result.createObjectStore("events", { keyPath: "id" });
+        };
+        r.onerror = () => { clearTimeout(timer); reject(new Error("capture-storage")); };
+        r.onsuccess = () => {
+          clearTimeout(timer);
+          if (expired) { r.result.close(); return; }
+          db = r.result;
+          db.onversionchange = () => { db.close(); db = null; gate = false; health = "store_changed"; };
+          resolve(db);
+        };
+      });
+    }
+    async function transaction(mode, work) {
+      const store = await openDb();
+      let tx, timer;
+      const operation = new Promise((resolve, reject) => {
+        let answer;
+        tx = store.transaction(["meta", "events"], mode);
+        tx.oncomplete = () => resolve(answer);
+        tx.onabort = tx.onerror = () => reject(new Error("capture-storage"));
+        try { work(tx.objectStore("meta"), tx.objectStore("events"), value => { answer = value; }); }
+        catch (_) { try { tx.abort(); } catch (_) {} reject(new Error("capture-storage")); }
+      });
+      unsettled.add(operation);
+      operation.then(() => unsettled.delete(operation), () => unsettled.delete(operation));
+      try {
+        return await Promise.race([operation, new Promise((_, reject) => {
+          timer = setTimeout(() => { gate = false; health = "durability_unknown"; try { tx.abort(); } catch (_) {} reject(new Error("capture-timeout")); }, 2000);
+        })]);
+      } finally { clearTimeout(timer); }
+    }
+    function enqueue(work, session) {
+      queue = queue.then(work).catch(() => { unconfirmedLossSession = session; gate = false; health = "loss_unconfirmed"; _capUi(); });
+      return queue;
+    }
+    async function settleAndRelease() {
+      await Promise.allSettled([...unsettled]);
+      const release = releaseLock; releaseLock = null;
+      release?.();
+    }
+    async function withLock(work) {
+      if (releaseLock) { if (unsettled.size) throw new Error("capture-unsettled"); return work(); }
+      if (lockTask) throw new Error("capture-busy");
+      if (!navigator.locks?.request) throw new Error("capture-unavailable");
+      return new Promise((resolve, reject) => {
+        lockTask = navigator.locks.request(CAP_DB, { mode: "exclusive", ifAvailable: true }, async lock => {
+          if (!lock) { reject(new Error("capture-busy")); return; }
+          const held = new Promise(done => { releaseLock = done; });
+          try { resolve(await work()); } catch (e) { reject(e); void settleAndRelease(); }
+          await held;
+        }).catch(reject).finally(() => { lockTask = null; });
+      });
+    }
+    function closeAcceptance() { lifecycle++; gate = false; }
+    function disable() { closeAcceptance(); epoch = null; }
+    async function stopInternal() {
+      const wasSession = meta?.id;
+      closeAcceptance();
+      await queue;
+      try {
+        if (!wasSession || !releaseLock) return { captureDisabledHere: true, stopPersisted: false, purgeVerified: false };
+        await transaction("readwrite", (ms, es) => {
+          const r = ms.get("session");
+          r.onsuccess = () => { if (r.result?.id === wasSession) ms.put({ ...r.result, active: false, endedAt: Date.now(), health: r.result.lost ? r.result.health : "ended" }); };
+        });
+        const check = await transaction("readonly", (ms, es, done) => { const r = ms.get("session"); r.onsuccess = () => done(r.result); });
+        const ok = check?.id === wasSession && check.active === false;
+        if (ok) { meta = check; health = unconfirmedLossSession === wasSession ? "loss_unconfirmed" : check.health; }
+        return { captureDisabledHere: true, stopPersisted: ok, purgeVerified: false };
+      } catch (_) { health = unconfirmedLossSession === wasSession ? "loss_unconfirmed" : "durability_unknown"; return { captureDisabledHere: true, stopPersisted: false, purgeVerified: false }; }
+      finally { void settleAndRelease(); _capUi(); }
+    }
+    async function recordLost(session) {
+      try {
+        if (!releaseLock) throw new Error("capture-no-lock");
+        const m = await transaction("readwrite", (ms, es, done) => {
+          const r = ms.get("session");
+          r.onsuccess = () => {
+            if (r.result?.id !== session) return;
+            const m = { ...r.result, lost: (r.result.lost || 0) + 1, health: "revoked_gap" };
+            ms.put(m); done(m);
+          };
+        });
+        if (!m) throw new Error("capture-session-changed");
+        meta = m; health = m.health;
+      } catch (_) {
+        unconfirmedLossSession = session;
+        gate = false; health = "loss_unconfirmed";
+      }
+      _capUi();
+    }
+    function event(type, fields) {
+      try {
+        if (!gate || !current() || !meta?.active) return null;
+        const e = clean(type, fields); if (!e) return null;
+        const session = meta.id, capturedEpoch = epoch;
+        if (type === "breaker") breakerCause = e.cause || e.id;
+        void enqueue(async () => {
+          if (!current() || epoch !== capturedEpoch || !releaseLock) { await recordLost(session); return; }
+          const m = await transaction("readwrite", (ms, es, done) => {
+            const r = ms.get("session");
+            r.onsuccess = () => {
+              const m = r.result;
+              if (!current() || epoch !== capturedEpoch || m?.id !== session || !m.active) { done({ dropped: true }); return; }
+              if (Date.now() >= m.deadline) { m.active = false; m.health = "ended"; }
+              else if (Math.abs((Date.now() - anchor.wall) - (_capClock() - anchor.mono)) > 2000) { m.active = false; m.health = "clock_gap"; }
+              else {
+                e.ordinal = m.count + 1;
+                const bytes = new TextEncoder().encode(JSON.stringify(e)).length;
+                if (m.count >= 2000 || m.bytes + bytes > 1048576) { m.active = false; m.health = "capacity"; m.lost++; }
+                else { es.add(e); m.count++; m.bytes += bytes; if (type === "render_call_completed" && m.phase === "validation") m.validationReady = true; }
+              }
+              ms.put(m); done(m);
+            };
+          });
+          if (m?.dropped) { await recordLost(session); return; }
+          if (m) { meta = m; health = m.health; if (!m.active) { gate = false; void settleAndRelease(); } }
+          _capUi();
+        }, session);
+        return e.id;
+      } catch (_) { disable(); health = "storage_error"; return null; }
+    }
+    async function begin(phase) {
+      if (!owner()) throw new Error("capture-owner-only");
+      if (mutating || gate || unsettled.size || lockTask || releaseLock) throw new Error("capture-busy");
+      mutating = true;
+      const startLife = lifecycle;
+      try {
+        return await withLock(async () => {
+          const authEpoch = eligibility().epoch;
+          const previous = await transaction("readonly", (ms, es, done) => { const r = ms.get("session"); r.onsuccess = () => done(r.result); });
+          if (lifecycle !== startLife || !owner() || eligibility().epoch !== authEpoch) throw new Error("capture-state-changed");
+          if (phase === "observation" && !(previous?.phase === "validation" && previous.validationReady)) throw new Error("capture-needs-validation");
+          const now = Date.now();
+          const m = { key: "session", id: id(), build: CAP_BUILD, phase, active: true, startedAt: now, deadline: now + CAP_DAY,
+            expiresAt: now + 2 * CAP_DAY, count: 0, bytes: 0, health: "ok", lost: 0, validationReady: phase === "observation" };
+          await transaction("readwrite", (ms, es) => {
+            if (lifecycle !== startLife || !owner() || eligibility().epoch !== authEpoch) throw new Error("capture-state-changed");
+            es.clear(); ms.put(m);
+          });
+          if (lifecycle !== startLife || !owner() || eligibility().epoch !== authEpoch) throw new Error("capture-state-changed");
+          meta = m; epoch = authEpoch; health = "ok"; breakerCause = null; gate = true;
+          anchor.wall = Date.now(); anchor.mono = _capClock();
+          event("capture_started", { stage: "card" }); await queue;
+        });
+      } finally { mutating = false; _capUi(); }
+    }
+    async function erase() {
+      const eraseEpoch = eligibility().epoch;
+      disable();
+      if (mutating) throw new Error("capture-busy");
+      await queue;
+      return withLock(async () => {
+        try {
+          await transaction("readwrite", (ms, es) => { ms.clear(); es.clear(); });
+          const empty = await transaction("readonly", (ms, es, done) => {
+            let a, b, n = 0; const finish = () => { if (++n === 2) done(a.length === 0 && b.length === 0); };
+            const x = ms.getAll(), y = es.getAll(); x.onsuccess = () => { a = x.result; finish(); }; y.onsuccess = () => { b = y.result; finish(); };
+          });
+          meta = null; health = empty ? "off" : "purge_unknown"; breakerCause = null;
+          return { captureDisabledHere: true, stopPersisted: false, purgeVerified: empty === true && eligibility().epoch === eraseEpoch };
+        } catch (_) { health = "purge_unknown"; return { captureDisabledHere: true, stopPersisted: false, purgeVerified: false }; }
+        finally { void settleAndRelease(); _capUi(); }
+      });
+    }
+    async function exported() {
+      if (!owner()) throw new Error("capture-owner-only");
+      await queue;
+      const exportEpoch = eligibility().epoch;
+      const s = await transaction("readonly", (ms, es, done) => {
+        let m, events, n = 0; const finish = () => { if (++n === 2) done({ m, events }); };
+        const a = ms.get("session"), b = es.getAll(); a.onsuccess = () => { m = a.result; finish(); }; b.onsuccess = () => { events = b.result; finish(); };
+      });
+      if (!owner() || eligibility().epoch !== exportEpoch) throw new Error("capture-state-changed");
+      if (s.m && Date.now() >= s.m.expiresAt) { const r = await erase(); if (!r.purgeVerified) throw new Error("capture-storage"); return exported(); }
+      const events = s.events.map(e => clean(e.type, e, e.at, e.id)).filter(Boolean).sort((a,b) => a.ordinal - b.ordinal);
+      const uncertain = !!s.m?.active && !(gate && meta?.id === s.m.id && current());
+      const expired = !!s.m && Date.now() >= s.m.deadline;
+      return { schema: 2, build: CAP_BUILD, scope: "participating-owner-tab-only", exportedAt: Date.now(),
+        coverage: { phase: s.m?.phase || "none", active: !!s.m?.active && !uncertain && !expired, health: s.m?.id === unconfirmedLossSession ? "loss_unconfirmed" : events.length !== (s.m?.count || 0) ? "event_gap" : uncertain ? "activity_unknown_no_resume" : expired ? "ended" : s.m?.health || "off",
+          lossAccountingConfirmed: s.m?.id !== unconfirmedLossSession, events: s.m?.count || 0, bytes: s.m?.bytes || 0, lost: s.m?.lost || 0, validationReady: !!s.m?.validationReady }, events };
+    }
+    let channel;
+    try { channel = new BroadcastChannel(CAP_DB); channel.onmessage = e => { if (e.data === "revoke") { try { window.__insCaptureAuth?.revoke(); } catch (_) {} disable(); void action(stopInternal); } }; } catch (_) {}
+    return { id, event, begin: phase => { const life = lifecycle; return action(() => { if (life !== lifecycle) throw new Error("capture-state-changed"); return begin(phase); }); }, stop: () => { closeAcceptance(); return action(stopInternal); }, erase: () => { disable(); return action(erase); }, exported, resume: async () => {}, drain: () => queue,
+      revokeLocal() { disable(); void action(stopInternal); },
+      async logout() { disable(); try { channel?.postMessage("revoke"); } catch (_) {} try { return await action(erase); } catch (_) { return { captureDisabledHere: true, purgeVerified: false, crossTabStop: "unknown" }; } },
+      code: v => CODES.has(v) ? v : "unknown", get active() { return gate && current() && !!meta?.active && Date.now() < meta.deadline; },
+      get session() { return meta?.id || null; }, get breakerCause() { return breakerCause; },
+      visibility(visible) { event("visibility", { stage: "card", flow: _capFlow, visible }); if (!visible) { closeAcceptance(); void action(stopInternal); } },
+      get status() { return { build: CAP_BUILD, health, busy: mutating, phase: meta?.phase || "none", active: gate && current() && !!meta?.active, count: meta?.count || 0, validationReady: !!meta?.validationReady, startedAt: meta?.startedAt || null, deadline: meta?.deadline || null }; }
+    };
+  })();
+
+  function _capUi() {
+    const el = document.getElementById("insCaptureStatus");
+    if (!el) return;
+    const s = _capture.status;
+    const phase = s.phase === "validation" ? "تجربة فقط، لا عداد رصد" : s.phase === "observation" ? "رصد 24 ساعة" : "لا تسجيل";
+    el.textContent = `${s.build} | ${phase} | ${s.active ? "يسجل" : "متوقف"} | ${s.health} | ${s.count}/2000` +
+      (s.startedAt ? ` | ${new Date(s.startedAt).toISOString()}` + (s.phase === "observation" ? ` → ${new Date(s.deadline).toISOString()}` : "") : "");
+    const b = document.getElementById("insCaptureObserve");
+    if (b) b.disabled = s.busy || s.active || !s.validationReady || s.phase !== "validation" || !["ok", "ended"].includes(s.health);
+  }
+  function _capRender(source, cause) {
+    if (!_gwIsOpen()) return;
+    _capture.event("render_call_completed", { flow: _capFlow, cause, stage: "card", source, first: !_capRendered,
+      ...(!_capRendered ? { elapsed_ms: _capClock() - _capOpenedAt } : {}) });
+    _capRendered = true;
+  }
+  function _capReason(e, stage, timedOut, jsonStarted) {
+    if (e?.message === "token-timeout") return "token_timeout";
+    if (timedOut) return "timeout";
+    if (stage === "token") return "auth_error";
+    if (jsonStarted) return "json_invalid";
+    return "network_or_cors";
+  }
+  function _capHttp(r, stage, request, attempt, started, flow) {
+    _capture.event("request", { stage, request, attempt, flow, status: r.status, elapsed_ms: _capClock() - started });
+    if (!_capture.active || r.ok || r.status === 304 || !r.body?.getReader) return;
+    // Error bodies were previously unused. Never await this in the application path.
+    const session = _capture.session;
+    void (async () => {
+      const reader = r.body.getReader();
+      const timer = setTimeout(() => { void reader.cancel().catch(() => {}); }, 150);
+      let code = "unknown", total = 0, text = "";
+      try {
+        const decoder = new TextDecoder();
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          total += chunk.value.byteLength;
+          if (total > 1024) break;
+          text += decoder.decode(chunk.value, { stream: true });
+        }
+        if (total <= 1024) code = _capture.code(JSON.parse(text).error?.code);
+      } catch (_) {} finally { clearTimeout(timer); void reader.cancel().catch(() => {}); }
+      if (_capture.session !== session) return;
+      _capture.event("http_detail", { stage, request, flow, status: r.status, code,
+        reason: code === "unknown" ? "code_unavailable" : "http" });
+    })().catch(() => {});
+  }
+  function _capStart(phase) {
+    if (_capStarting) return Promise.reject(new Error("capture-busy"));
+    const pending = _capture.begin(phase); _capStarting = pending;
+    return pending.finally(() => { if (_capStarting === pending) _capStarting = null; });
+  }
+  window.InstructionsModule.capture = {
+    startValidation() { return _capStart("validation"); },
+    startObservation() { return _capStart("observation"); },
+    stop() { return _capture.stop(); }, clear() { if (!window.__insCaptureAuth?.getEligibility().eligible || !_isOwnerUser()) return Promise.reject(new Error("capture-owner-only")); return _capture.erase(); },
+    exportData() { return _capture.exported(); },
+    revokeLocal() { _capture.revokeLocal(); }, logout() { return _capture.logout(); },
+    async action(action) {
+      if (!_isOwnerUser()) return;
+      try {
+        if (action === "validation" && window.confirm("بدء تجربة محلية في هذا التبويب؟ السجل السابق سيستبدل. لا استئناف تلقائي بعد إعادة التحميل.")) await this.startValidation();
+        if (action === "observe" && window.confirm("هل راجعت ملف التجربة؟ بدء جلسة مستقلة حتى 24 ساعة، تتوقف عند إخفاء التبويب.")) await this.startObservation();
+        if (action === "stop") { const r = await this.stop(); if (!r.stopPersisted) throw new Error("capture-stop-unknown"); }
+        if (action === "clear" && window.confirm("مسح سجل التشخيص فقط؟")) { const r = await this.clear(); if (!r.purgeVerified) throw new Error("capture-purge-unknown"); window.toast?.("السجل فارغ عند التحقق"); }
+        if (action === "export") { const data = await this.exportData(); const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })); const a = document.createElement("a"); a.href = url; a.download = "instructions-capture.json"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+      } catch (_) { window.toast?.("التشخيص غير متاح أو تعذر تأكيد الإجراء. لا تعتمد على اكتمال الإيقاف أو المسح في التبويبات الأخرى.", "error"); }
+      _capUi();
+    }
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (_capture.active) _capture.visibility(document.visibilityState === "visible");
+  });
+
 
   /* ── بوابة بليس (المرحلة 2: كارت تجريبي) ──
      القراءة من الـ Worker عندما يكون الوضع "gateway"، وأي فشل ← مستمع Firestore الحالي.
@@ -66,52 +390,68 @@
     ]);
   }
 
-  async function _gwConfig() {
+  async function _gwConfig(trace = {}) {
     try {
       const c = JSON.parse(sessionStorage.getItem("gwCfg") || "null");
       if (c && c.cards && Date.now() - c.at < GW_CFG_TTL) return c.cards;
     } catch (_) {}
     const ac = new AbortController();
-    const to = setTimeout(() => ac.abort(), GW_TIMEOUT);
+    const request = _capture.id(), started = _capClock();
+    let stage = "token", timedOut = false, jsonStarted = false;
+    const to = setTimeout(() => { timedOut = true; ac.abort(); }, GW_TIMEOUT);
     try {
-      const r = await fetch(GW_URL + "/v1/config", { signal: ac.signal, headers: { Authorization: "Bearer " + (await _gwToken()) } });
-      if (!r.ok) { _gwTrip(); return null; }
+      const token = await _gwToken(); stage = "config";
+      const r = await fetch(GW_URL + "/v1/config", { signal: ac.signal, headers: { Authorization: "Bearer " + token } });
+      _capHttp(r, "config", request, 1, started, trace.flow);
+      if (!r.ok) { trace.reason = "http"; trace.cause = request; trace.status = r.status; _gwTrip(request, "config"); return null; }
+      jsonStarted = true;
       const j = await r.json();
       if (j && j.v === 1 && j.data && j.data.cards) {
         try { sessionStorage.setItem("gwCfg", JSON.stringify({ at: Date.now(), cards: j.data.cards })); } catch (_) {}
         return j.data.cards;
       }
-    } catch (_) { _gwTrip(); }
+      trace.reason = "config_invalid"; trace.cause = request;
+    } catch (e) {
+      trace.reason = _capReason(e, stage, timedOut, jsonStarted); trace.cause = request;
+      _capture.event("attempt_error", { flow: trace.flow, request, stage, reason: trace.reason,
+        code: _capture.code(e?.code), elapsed_ms: _capClock() - started });
+      _gwTrip(request, "config");
+    }
     finally { clearTimeout(to); }
     return null; // أي فشل أو مهلة ← firebase
   }
 
   // 2.8: لا يُعتمد ردّ البوابة إلا بغلاف سليم كامل، وإلا تُرفض البيانات
-  function _gwValidPayload(j) {
-    if (!j || j.v !== 1 || !j.meta || j.meta.complete !== true) return false;
-    if (!Array.isArray(j.data) || j.meta.count !== j.data.length) return false;
-    if (!j.meta.generatedAt || Date.now() - j.meta.generatedAt > 5 * 60e3) return false;
+  function _gwValidPayload(j, trace) {
+    const bad = reason => { if (trace) trace.reason = reason; return false; };
+    if (!j || j.v !== 1 || !j.meta || j.meta.complete !== true) return bad("payload_envelope");
+    if (!Array.isArray(j.data) || j.meta.count !== j.data.length) return bad("payload_count");
+    if (!j.meta.generatedAt || Date.now() - j.meta.generatedAt > 5 * 60e3) return bad("payload_age");
     for (const d of j.data) {
-      if (!d || typeof d.featureKey !== "string" || typeof d.featureTitle !== "string" || !Array.isArray(d.blocks)) return false;
-      for (const b of d.blocks) if (!b || !["h", "p", "img"].includes(b.t) || typeof b.v !== "string") return false;
+      if (!d || typeof d.featureKey !== "string" || typeof d.featureTitle !== "string" || !Array.isArray(d.blocks)) return bad("payload_item");
+      for (const b of d.blocks) if (!b || !["h", "p", "img"].includes(b.t) || typeof b.v !== "string") return bad("payload_block");
     }
     return true;
   }
 
   function _gwIsOpen() { const r = _root(); return !!(r && r.classList.contains("instructions-open")); }
 
-  function _gwRenderFromDocs() {
+  function _gwRenderFromDocs(source = "gateway", cause) {
     if (!_gwIsOpen()) return; // الكارت أُغلق أثناء الطلب: لا رسم ولا بدء مستمع
     if (_view === "list") _renderList();
     else if (_view === "read") { if (_docs[_curKey]) _renderRead(); else _goList(); }
+    _capRender(source, cause);
   }
 
   const GW_CARD = "instructions"; // مفتاح القاطع لكل كارت على حدة (ملاحظة المالك أ): فشل كارت لا يُسقط الباقي
-  function _gwTrip() { try { sessionStorage.setItem("gwDown:" + GW_CARD, String(Date.now())); } catch (_) {} }
+  function _gwTrip(cause, stage = "content") { _capture.event("breaker", { stage, flow: _capFlow, cause }); try { sessionStorage.setItem("gwDown:" + GW_CARD, String(Date.now())); } catch (_) {} }
   function _gwDown() { try { const t = +sessionStorage.getItem("gwDown:" + GW_CARD) || 0; return t > 0 && Date.now() - t < GW_DOWN_TTL; } catch (_) { return false; } }
   function _gwUp()   { try { sessionStorage.removeItem("gwDown:" + GW_CARD); } catch (_) {} }
 
-  function _gwToFirebase() { _gwTrip(); _gwMode = "firebase"; if (_gwIsOpen()) _fsStart(); }
+  function _gwToFirebase(reason, cause, details = {}) {
+    const fallback = _capture.event("fallback", { stage: "content", flow: _capFlow, reason, cause, ...details });
+    _gwTrip(fallback || cause); _gwMode = "firebase"; if (_gwIsOpen()) _fsStart(fallback);
+  }
 
   async function _gwFetch(force) {
     if (_gwInflight) return _gwInflight;
@@ -122,33 +462,45 @@
     const ac = _gwAbort = new AbortController();
     _gwInflight = (async () => {
       for (let attempt = 0; attempt < 3; attempt++) { // إعادتان كحد أقصى، على 5xx/الشبكة فقط
-        let timedOut = false;
+        let timedOut = false, stage = "token", jsonStarted = false, httpStatus = null;
+        const request = _capture.id(), flow = _capFlow, started = _capClock();
         const to = setTimeout(() => { timedOut = true; ac.abort(); }, GW_TIMEOUT);
         try {
           // If-None-Match فقط إذا كانت النسخة المحلية موجودة فعلًا (close() يفرّغ _docs؛ وإلا أظهر 304 قائمة فارغة خطأً)
           const hasLocal = Object.keys(_docs).length > 0;
+          const token = await _gwToken(); stage = "content";
           const r = await fetch(GW_URL + "/v1/content/instructions", {
             signal: ac.signal,
-            headers: { Authorization: "Bearer " + (await _gwToken()), ...(_gwEtag && hasLocal ? { "If-None-Match": _gwEtag } : {}) },
+            headers: { Authorization: "Bearer " + token, ...(_gwEtag && hasLocal ? { "If-None-Match": _gwEtag } : {}) },
           });
-          if (r.status === 304) { _gwUp(); _gwRenderFromDocs(); return; }
-          if (r.status === 503 || (r.status >= 400 && r.status < 500)) { _gwToFirebase(); return; } // disabled أو 4xx: فورًا وبلا إعادة
+          httpStatus = r.status;
+          _capHttp(r, "content", request, attempt + 1, started, flow);
+          if (r.status === 304) { _gwUp(); _gwRenderFromDocs("gateway-memory", request); return; }
+          if (r.status === 503 || (r.status >= 400 && r.status < 500)) { _gwToFirebase("http", request, { status: r.status }); return; } // disabled أو 4xx: فورًا وبلا إعادة
           if (!r.ok) throw new Error("gw-" + r.status);
-          const j = await r.json();
-          if (!_gwValidPayload(j)) { _gwToFirebase(); return; }
+          jsonStarted = true;
+          const j = await r.json(), validation = {};
+          if (!_gwValidPayload(j, validation)) {
+            _gwToFirebase(validation.reason, request, { ...(typeof j?.meta?.generatedAt === "number" ? { age_ms: Date.now() - j.meta.generatedAt } : {}) }); return;
+          }
           _gwUp();
           _gwEtag = r.headers.get("ETag") || j.etag || _gwEtag;
           _docs = {};
           j.data.forEach(d => { _docs[d.featureKey] = { id: d.featureKey, ...d }; });
-          _gwRenderFromDocs();
+          _gwRenderFromDocs("gateway", request);
           return;
         } catch (e) {
           clearTimeout(to); // أول سطر في الـcatch (إصلاح مراجعة المالك): إيقاف مؤقّت المحاولة قبل أي انتظار حتى لا يُجهَض المتحكّم أثناء الـbackoff
           if (e && e.name === "AbortError") {
-            if (timedOut) { _gwToFirebase(); return; } // بوابة معلّقة: رجوع فوري بلا إعادة
+            if (timedOut) { _gwToFirebase("timeout", request); return; } // بوابة معلّقة: رجوع فوري بلا إعادة
+            _capture.event("cancel", { flow, request, stage, reason: "closed" });
             return; // إلغاء عمدي (إغلاق الكارت أو إعادة فتحه)
           }
-          if (attempt >= 2) { _gwToFirebase(); return; }
+          const reason = httpStatus >= 400 ? "http" : _capReason(e, stage, timedOut, jsonStarted);
+          const cause = _capture.event("attempt_error", { flow, request, stage, reason,
+            ...(httpStatus !== null ? { status: httpStatus } : {}), code: _capture.code(e?.code), attempt: attempt + 1,
+            elapsed_ms: _capClock() - started });
+          if (attempt >= 2) { _gwToFirebase("retry_exhausted", cause || request); return; }
           await new Promise(res => setTimeout(res, 1000 * (attempt + 1))); // تباعد متصاعد
         } finally { clearTimeout(to); }
       }
@@ -166,6 +518,7 @@
 
   // مزامنة بعد حفظ/حذف المالك — منفصلة تمامًا عن نجاح الحفظ نفسه
   async function _gwSync(key) {
+    const request = _capture.id(), started = _capClock(), flow = _capFlow;
     try {
       const r = await fetch(GW_URL + "/v1/admin/sync/instructions", {
         method: "POST",
@@ -173,9 +526,11 @@
         headers: { Authorization: "Bearer " + (await _gwToken()), "Content-Type": "application/json" },
         body: JSON.stringify({ key }),
       });
+      _capHttp(r, "sync", request, 1, started, flow);
       if (!r.ok) throw new Error("sync-" + r.status);
       _gwPendingClear(key);
     } catch (e) {
+      _capture.event("sync_error", { flow, request, stage: "sync", reason: /^sync-/.test(e?.message || "") ? "http" : "network_or_cors", code: _capture.code(e?.code) });
       window.toast?.("تعثّرت المزامنة الاحتياطية — ستُعاد تلقائيًا عند فتح الكارت", "error");
       _gwPendingAdd(key);
     }
@@ -207,25 +562,11 @@
   function _isOwnerUser() { return !!(window.isOwner && window.isOwner()); }
   function _safeImg(u) { return typeof u === "string" && u.startsWith("https://res.cloudinary.com/"); }
 
-  function _uploadImage(file, onProgress) {
-    return new Promise((resolve, reject) => {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("upload_preset", UPLOAD_PRESET);
-      const xhr = new XMLHttpRequest();
-      xhr.upload.addEventListener("progress", e => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); });
-      xhr.addEventListener("load", () => {
-        try {
-          const d = JSON.parse(xhr.responseText);
-          if (!d.secure_url) { reject(new Error(d?.error?.message || "فشل الرفع")); return; }
-          resolve(d.secure_url);
-        } catch (e) { reject(e); }
-      });
-      xhr.addEventListener("error", () => reject(new Error("خطأ في الشبكة")));
-      xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`);
-      xhr.send(fd);
-    });
-  }
+  async function _uploadImage(file, onProgress) {
+ const {uploadMedia}=await import(new URL('js/media-upload.js',document.baseURI).href);
+ const data=await uploadMedia(file,p=>onProgress(p.pct),'instructions');
+ return data.secure_url;
+}
 
   /* ─────────────────────────────────────────
      المميزات: تُقرأ حيّة من كروت المنتدى الموجودة (لا نسخ، لا تعديل عليها)
@@ -278,7 +619,7 @@
     });
   }
 
-  async function _fsStart() {
+  async function _fsStart(cause) {
     if (_unsub) return;
     try {
       const { db, collection, onSnapshot } = await _getFS();
@@ -287,23 +628,37 @@
         snap.docs.forEach(d => { _docs[d.id] = { id: d.id, ...d.data() }; });
         if (_view === "list") _renderList();
         else if (_view === "read") { if (_docs[_curKey]) _renderRead(); else _goList(); }
-      }, () => _fail());
-    } catch (e) { _fail(); }
+        _capRender(typeof snap.metadata?.fromCache === "boolean" ? (snap.metadata.fromCache ? "firebase-cache" : "firebase-server") : "firebase-unknown", cause);
+      }, e => {
+        _capture.event("firestore_error", { stage: "firestore-listen", flow: _capFlow, code: _capture.code(e?.code) }); _fail();
+      });
+    } catch (e) {
+      _capture.event("firestore_error", { stage: "firestore-init", flow: _capFlow, code: _capture.code(e?.code) }); _fail();
+    }
   }
 
   async function _startListener() {
     if (_unsub) return;
-    if (_gwDown()) { _gwMode = "firebase"; _fsStart(); return; } // قاطع الدائرة مفتوح: بلا حتى طلب إعداد
-    const cards = await _gwConfig(); // null أو غياب المفتاح ← firebase
+    if (_gwDown()) {
+      const cause = _capture.breakerCause;
+      const fallback = _capture.event("fallback", { stage: "card", flow: _capFlow, reason: cause ? "breaker_open" : "breaker_preexisting_unknown", cause });
+      _gwMode = "firebase"; _fsStart(fallback); return;
+    } // قاطع الدائرة مفتوح: بلا حتى طلب إعداد
+    const trace = { flow: _capFlow };
+    const cards = await _gwConfig(trace); // null أو غياب المفتاح ← firebase
     if (!_gwIsOpen()) return;      // أُغلق الكارت أثناء جلب الإعداد: لا مستمع
     const mode = (cards && cards.instructions) || "firebase";
     _gwMode = mode;
     if (mode === "gateway") {
+      _capture.event("source", { stage: "card", flow: trace.flow, mode, source: "gateway" });
       _gwBindVisibility();
       await _gwFetch(true); // عند أي فشل يستدعي _gwToFirebase() داخليًا
       return;
     }
-    _fsStart(); // firebase وshadow: السلوك الحالي كما هو
+    const fallback = trace.reason ? _capture.event("fallback", { stage: "config", flow: trace.flow, reason: trace.reason, cause: trace.cause, status: trace.status }) : null;
+    _capture.event("source", { stage: "card", flow: trace.flow, mode, source: "firebase-unknown",
+      ...(!fallback ? { reason: mode === "shadow" ? "mode_shadow" : mode === "firebase" ? "mode_firebase" : "unknown" } : { cause: fallback }) });
+    _fsStart(fallback); // firebase وshadow: السلوك الحالي كما هو
   }
   function _fail() {
     const b = _body();
@@ -324,10 +679,22 @@
           <div class="ins-title" id="insTitle"><i class="fa-solid fa-circle-info"></i> <span id="insTitleText">تعليمات</span></div>
           <button class="ins-add-btn" id="insAddBtn" onclick="window.InstructionsModule._openEditor()" style="display:none"><i class="fa-solid fa-plus"></i></button>
         </div>
+        ${_isOwnerUser() ? `<details class="ins-capture"><summary>تشخيص التعليمات المؤقت · هذا التبويب فقط</summary>
+          <p>لا استئناف تلقائي. الإخفاء يوقف الجلسة. لا بيانات حساب أو محتوى. صدّر السجل يدويًا قبل مسحه.</p>
+          <output id="insCaptureStatus" aria-live="polite"></output>
+          <div class="ins-capture-actions">
+            <button type="button" onclick="InstructionsModule.capture.action('validation')">تجربة التسجيل</button>
+            <button type="button" id="insCaptureObserve" disabled onclick="InstructionsModule.capture.action('observe')">بدء 24 ساعة بعد التحقق</button>
+            <button type="button" onclick="InstructionsModule.capture.action('stop')">إيقاف</button>
+            <button type="button" onclick="InstructionsModule.capture.action('export')">تصدير محلي</button>
+            <button type="button" onclick="InstructionsModule.capture.action('clear')">مسح السجل</button>
+          </div>
+        </details>` : ""}
         <div class="ins-body" id="insBody">
           <div class="ins-loading"><div class="ins-spinner"></div><span>جارِ التحميل...</span></div>
         </div>
       </div>`;
+    _capUi();
   }
 
   function _setHeader(title, showAdd) {
@@ -610,7 +977,8 @@
         updatedBy:    window.currentUser?.uid || ""
       };
       if (!_docs[_draft.key]) payload.createdAt = serverTimestamp();
-      await setDoc(doc(db, COL, _draft.key), payload, { merge: true });
+      try { await setDoc(doc(db, COL, _draft.key), payload, { merge: true }); }
+      catch (e) { _capture.event("firestore_error", { stage: "firestore-save", flow: _capFlow, code: _capture.code(e?.code) }); throw e; }
       await _gwSync(_draft.key);            // زر الحفظ معطّل أثناءها؛ لا تمنع الحفظ عند فشلها
       if (_gwMode === "gateway") await _gwFetch(true);
       window.toast?.("تم الحفظ ✓");
@@ -631,7 +999,8 @@
     if (!window.confirm("حذف تعليمات هذه الميزة نهائيًا؟\n(الميزة نفسها لا تتأثر، والصور تبقى على Cloudinary)")) return;
     try {
       const { db, doc, deleteDoc } = await _getFS();
-      await deleteDoc(doc(db, COL, key));
+      try { await deleteDoc(doc(db, COL, key)); }
+      catch (e) { _capture.event("firestore_error", { stage: "firestore-delete", flow: _capFlow, code: _capture.code(e?.code) }); throw e; }
       await _gwSync(key);                   // حذف ناعم في Supabase؛ لا يمنع الحذف عند فشلها
       window.toast?.("تم الحذف");
     } catch (e) {
@@ -651,6 +1020,9 @@
   window.InstructionsModule.open = function () {
     const root = _root();
     if (!root) return;
+    _capFlow = _capture.id(); _capOpenedAt = _capClock(); _capRendered = false;
+    void _capture.resume();
+    _capture.event("card_open", { stage: "card", flow: _capFlow, visible: document.visibilityState === "visible" });
     _view = "list"; _curKey = null; _draft = null; _busy = false;
     root.classList.add("instructions-open");
     root.style.display = "flex";
@@ -663,6 +1035,7 @@
   window.InstructionsModule.close = function () {
     const root = _root();
     if (!root) return;
+    _capture.event("card_close", { stage: "card", flow: _capFlow });
     root.classList.remove("instructions-open");
     root.style.display = "none";
     root.innerHTML = "";
