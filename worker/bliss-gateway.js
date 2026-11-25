@@ -49,7 +49,7 @@ function corsHeaders(request, env) {
   if (!o || !allowedOrigins(env).includes(o)) return { "Vary": "Origin" };
   return {
     "Access-Control-Allow-Origin": o,
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, If-None-Match",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, If-None-Match, X-File-Name, X-Upload-Context",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
@@ -935,6 +935,97 @@ async function handleCardShadow(request, env, user, card) {
     { complete: true, count: compared, version: V, generatedAt: Date.now() });
 }
 
+/* Authenticated uploads. Secrets stay in Worker bindings, never in browser code. */
+const MEDIA_CLOUD = 'h198yuha';
+const MEDIA_FORMATS = Object.freeze({
+ jpg:['image/jpeg','image'],jpeg:['image/jpeg','image'],png:['image/png','image'],gif:['image/gif','image'],webp:['image/webp','image'],
+ pdf:['application/pdf','raw'],txt:['text/plain','raw'],csv:['text/csv','raw'],
+ doc:['application/msword','raw'],docx:['application/vnd.openxmlformats-officedocument.wordprocessingml.document','raw'],
+ xls:['application/vnd.ms-excel','raw'],xlsx:['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','raw'],
+ ppt:['application/vnd.ms-powerpoint','raw'],pptx:['application/vnd.openxmlformats-officedocument.presentationml.presentation','raw'],
+ zip:['application/zip','raw'],rar:['application/vnd.rar','raw'], '7z':['application/x-7z-compressed','raw'],
+ mp3:['audio/mpeg','video'],wav:['audio/wav','video'],ogg:['audio/ogg','video'],m4a:['audio/mp4','video'],webm:['audio/webm','video'],
+ mp4:['video/mp4','video'],mov:['video/quicktime','video']
+});
+function mediaMagic(ext,b) {
+ const ascii=(s,n=0)=>s.split('').every((c,i)=>b[n+i]===c.charCodeAt(0));
+ if(['jpg','jpeg'].includes(ext))return b[0]===255&&b[1]===216&&b[2]===255;
+ if(ext==='png')return b[0]===137&&ascii('PNG\r\n\x1a\n',1);
+ if(ext==='gif')return ascii('GIF87a')||ascii('GIF89a');
+ if(ext==='webp')return ascii('RIFF')&&ascii('WEBP',8);
+ if(ext==='pdf')return ascii('%PDF-');
+ if(['docx','xlsx','pptx','zip'].includes(ext))return ascii('PK')&&[3,5,7].includes(b[2]);
+ if(['doc','xls','ppt'].includes(ext))return [208,207,17,224,161,177,26,225].every((x,i)=>b[i]===x);
+ if(ext==='rar')return ascii('Rar!');
+ if(ext==='7z')return [55,122,188,175,39,28].every((x,i)=>b[i]===x);
+ if(ext==='mp3')return ascii('ID3')||(b[0]===255&&(b[1]&224)===224);
+ if(ext==='wav')return ascii('RIFF')&&ascii('WAVE',8);
+ if(ext==='ogg')return ascii('OggS');
+ if(ext==='webm')return [26,69,223,163].every((x,i)=>b[i]===x);
+ if(['mp4','m4a','mov'].includes(ext))return ascii('ftyp',4);
+ if(['txt','csv'].includes(ext))return !b.includes(0);
+ return false;
+}
+async function handleMediaUpload(request,env,user) {
+ const fail=(status,code)=>err(request,env,status,code);
+ if(!env.CLOUDINARY_API_KEY||!env.CLOUDINARY_API_SECRET)return fail(503,'media-not-configured');
+ const token=request.headers.get('Authorization');
+ let profile;
+ try {
+  const r=await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/users/${encodeURIComponent(user.sub)}`,{headers:{Authorization:token},signal:AbortSignal.timeout(10000)});
+  if(!r.ok)return fail(r.status===404||r.status===403?403:503,r.status===404||r.status===403?'media-profile-required':'media-profile-unavailable');
+  profile=(await r.json()).fields||{};
+ }catch(_){return fail(503,'media-profile-unavailable');}
+ if(profile.isBanned?.booleanValue||profile.isChatBanned?.booleanValue)return fail(403,'media-banned');
+ const context=request.headers.get('X-Upload-Context')||'general';
+ if(!['general','military','instructions'].includes(context))return fail(400,'media-context');
+ if(context!=='general'&&user.sub!==env.OWNER_UID)return fail(403,'owner-only');
+ let name;
+ try{name=decodeURIComponent(request.headers.get('X-File-Name')||'');}catch(_){return fail(400,'media-filename');}
+ if(!name||name.length>180||/[\x00-\x1f/\\]/.test(name))return fail(400,'media-filename');
+ const ext=name.split('.').pop().toLowerCase(),spec=MEDIA_FORMATS[ext];
+ if(!spec)return fail(415,'media-format');
+ const type=(request.headers.get('Content-Type')||'').split(';')[0].toLowerCase();
+ const aliases={'audio/x-wav':'audio/wav','application/x-zip-compressed':'application/zip','application/x-rar-compressed':'application/vnd.rar','video/webm':'audio/webm'};
+ if(type!==spec[0]&&aliases[type]!==spec[0]&&type!=='application/octet-stream')return fail(415,'media-mime');
+ const isVideo=['mp4','mov','webm'].includes(ext);
+ if(context==='instructions'&&spec[1]!=='image')return fail(415,'media-image-only');
+ const max=(isVideo?100:10)*1000*1000;
+ const rawLength=request.headers.get('Content-Length');
+ if(rawLength!==null&&(!/^\d+$/.test(rawLength)||Number(rawLength)>max||Number(rawLength)<1))return fail(413,'media-size');
+ if(!request.body)return fail(400,'media-empty');
+ const reader=request.body.getReader(); let first=new Uint8Array(16),sampled=0,total=0;const initial=[];
+ const controller=new AbortController();
+ const abort=()=>{controller.abort();reader.cancel().catch(()=>{});};
+ request.signal?.addEventListener('abort',abort,{once:true});
+ if(request.signal?.aborted)abort();
+ const timeout=setTimeout(abort,120000);
+ try {
+ try {
+  while(sampled<16){const p=await reader.read();if(p.done)break;total+=p.value.length;if(total>max){await reader.cancel();return fail(413,'media-size');}const n=Math.min(16-sampled,p.value.length);first.set(p.value.subarray(0,n),sampled);sampled+=n;initial.push(p.value);}
+ }catch(_){return fail(400,'media-body');}
+ if(controller.signal.aborted)return fail(408,'media-timeout');
+ if(!sampled||!mediaMagic(ext,first.subarray(0,sampled))){await reader.cancel();return fail(415,'media-content');}
+ const timestamp=String(Math.floor(Date.now()/1000)),folder='bliss/'+user.sub;
+ const signInput=`folder=${folder}&timestamp=${timestamp}${env.CLOUDINARY_API_SECRET}`;
+ const signature=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(signInput)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+ const boundary='bliss-'+crypto.randomUUID(),enc=new TextEncoder();
+ const fields={api_key:env.CLOUDINARY_API_KEY,timestamp,folder,signature};
+ let head='';for(const [key,value]of Object.entries(fields))head+=`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`;
+ head+=`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="upload.${ext}"\r\nContent-Type: ${spec[0]}\r\n\r\n`;
+ let stage=0,sizeError=false;
+ const stream=new ReadableStream({async pull(controller){try{if(stage===0){stage=1;controller.enqueue(enc.encode(head));for(const chunk of initial)controller.enqueue(chunk);initial.length=0;return;}const p=await reader.read();if(p.done){controller.enqueue(enc.encode(`\r\n--${boundary}--\r\n`));controller.close();return;}total+=p.value.length;if(total>max){sizeError=true;await reader.cancel();controller.error(Error('media-size'));return;}controller.enqueue(p.value);}catch(_){controller.error(Error('media-body'));}},cancel(){return reader.cancel();}});
+ try {
+  const r=await fetch(`https://api.cloudinary.com/v1_1/${MEDIA_CLOUD}/${spec[1]}/upload`,{method:'POST',headers:{'Content-Type':'multipart/form-data; boundary='+boundary},body:stream,duplex:'half',signal:controller.signal});
+  if(sizeError)return fail(413,'media-size');
+  if(!r.ok)return fail(502,'media-provider-rejected');
+  const data=await r.json();
+  if(typeof data.secure_url!=='string'||!data.secure_url.startsWith(`https://res.cloudinary.com/${MEDIA_CLOUD}/`))return fail(502,'media-provider-response');
+  return new Response(JSON.stringify({secure_url:data.secure_url,public_id:data.public_id,resource_type:data.resource_type,bytes:data.bytes,format:data.format}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...corsHeaders(request,env)}});
+ }catch(_){return fail(sizeError?413:502,sizeError?'media-size':'media-upload-failed');}
+ } finally{clearTimeout(timeout);request.signal?.removeEventListener('abort',abort);try{await reader.cancel();}catch(_){}}
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -957,7 +1048,7 @@ export default {
     if (isHealth) return ok(request, env, { ok: true }, { complete: true, count: 0, generatedAt: Date.now() }, { "Cache-Control": "no-store" });
 
     const ROUTES = {
-      "GET /v1/config": 1, "GET /v1/content/instructions": 1,
+      "POST /v1/media/upload": 1, "GET /v1/config": 1, "GET /v1/content/instructions": 1,
       "POST /v1/admin/sync/instructions": 1, "GET /v1/admin/reconcile/instructions": 1,
       "POST /v1/admin/reconcile/instructions/fix": 1, "GET /v1/admin/shadow/instructions": 1,
     };
@@ -1003,6 +1094,7 @@ export default {
       if (cardRoute && cardRoute.op === "shadow") return handleCardShadow(request, env, user, cardRoute.card);
     }
 
+    if (routeKey === "POST /v1/media/upload") return handleMediaUpload(request, env, user);
     const cards = await readFlags(env);
 
     if (routeKey === "GET /v1/content/instructions") return handleInstructionsContent(request, env, user, cards);

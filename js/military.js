@@ -31,12 +31,10 @@
   }
 
   /* ─────────────────────────────────────────
-     Cloudinary — نفس بيانات الحساب المستخدمة أصلاً في المشروع (chat uploads)
-     ملاحظة: بدون قيد منع الفيديو الموجود في دالة الشات uploadToCloudinary،
+     رفع موثق عبر Worker الخاص بالمشروع
+     المكتبة تدعم الفيديو والملفات مع تحقق الخادم من النوع والحجم،
      لأن هذه المكتبة مخصصة لرفع الفيديوهات التعليمية عمدًا
   ───────────────────────────────────────── */
-  const CLOUD_NAME     = "dnbvvfita";
-  const UPLOAD_PRESET  = "university_upload";
 
   function _detectType(file) {
     const t = file.type || "";
@@ -67,32 +65,10 @@
     return url.includes("/upload/") ? url.replace("/upload/", "/upload/fl_attachment/") : url;
   }
 
-  function _uploadWithProgress(file, onProgress) {
-    return new Promise((resolve, reject) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("upload_preset", UPLOAD_PRESET);
-      const xhr = new XMLHttpRequest();
-      xhr.upload.addEventListener("progress", (e) => {
-        if (!e.lengthComputable) return;
-        onProgress(Math.round((e.loaded / e.total) * 100));
-      });
-      xhr.addEventListener("load", () => {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          if (!data.secure_url) {
-            reject(new Error(data?.error?.message || "فشل الرفع"));
-            return;
-          }
-          resolve(data); // نُعيد الاستجابة كاملة (تحتوي public_id, resource_type, secure_url)
-        } catch (e) { reject(e); }
-      });
-      xhr.addEventListener("error", () => reject(new Error("خطأ في الشبكة")));
-      xhr.addEventListener("abort", () => reject(new Error("تم الإلغاء")));
-      xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`);
-      xhr.send(formData);
-    });
-  }
+  async function _uploadWithProgress(file, onProgress) {
+ const {uploadMedia}=await import(new URL('js/media-upload.js',document.baseURI).href);
+ return uploadMedia(file,p=>onProgress(p.pct),'military');
+}
 
   /* ─────────────────────────────────────────
      الحالة

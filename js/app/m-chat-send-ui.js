@@ -178,8 +178,7 @@ document.getElementById("chatFileInput").addEventListener("change", async () => 
   const file = document.getElementById("chatFileInput").files[0];
   if (!file || !currentUser) return;
   if (_isChatBanned) { toast("أنت محظور من إرسال الرسائل", "error"); return; }
-  if (file.type.startsWith("video/")) { toast("ممنوع إرسال فيديوهات", "error"); return; }
-  if (file.size > 15 * 1024 * 1024) { toast("حجم الملف كبير جداً (max 15MB)", "error"); return; }
+  if (file.size > ((/\.(mp4|mov|webm)$/i.test(file.name)||file.type.startsWith("video/")) ? 100 : 10) * 1000 * 1000) { toast(file.type.startsWith("video/") ? "أقصى حجم للفيديو 100MB" : "أقصى حجم للملف 10MB", "error"); return; }
 
   const isPDF = file.type === "application/pdf" || file.name.endsWith(".pdf");
   const upCard = _buildUploadCard(file);
@@ -207,8 +206,8 @@ document.getElementById("chatFileInput").addEventListener("change", async () => 
       fileFields = { pdf: url, fileName: file.name };
     } else if (cat === "audio") {
       fileFields = { audio: url, fileName: file.name, fileSize: file.size };
-    } else if (cat === "doc" || cat === "zip" || cat === "file") {
-      fileFields = { file: url, fileName: file.name, fileSize: file.size, fileType: file.type };
+    } else if (cat === "doc" || cat === "zip" || cat === "file" || cat === "video" || /\.(mp4|mov|webm)$/i.test(file.name)) {
+      fileFields = { file: url, fileName: file.name, fileSize: file.size, fileType: /\.(mp4|mov|webm)$/i.test(file.name) ? "video/" + file.name.split(".").pop().toLowerCase() : file.type };
     } else {
       fileFields = { image: url };
     }

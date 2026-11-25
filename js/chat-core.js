@@ -462,13 +462,16 @@ function appendChatMsg(container, docId, d, prevDate, setDate, prevSenderUid, se
       : `<div class="bubble-text" style="color:var(--muted);font-size:12px;"><i class="fa-solid fa-microphone"></i> صوت</div>`;
   } else if (d.file) {
     const safeSrc = typeof d.file === "string" && d.file.startsWith("https://res.cloudinary.com") ? d.file : "";
+    const isVideoFile = /^video\//.test(d.fileType||"");
     const ext = (d.fileName||"").split(".").pop().toUpperCase();
     const fIcon = ext === "ZIP" || ext === "RAR" || ext === "7Z" ? "fa-file-zipper"
       : ext === "DOC" || ext === "DOCX" ? "fa-file-word"
       : ext === "XLS" || ext === "XLSX" ? "fa-file-excel"
       : ext === "PPT" || ext === "PPTX" ? "fa-file-powerpoint"
       : "fa-file";
-    bubbleContent = safeSrc
+    bubbleContent = safeSrc && isVideoFile
+      ? `<div class="bubble-text"><video controls preload="metadata" playsinline style="width:100%;max-width:320px;max-height:360px;" src="${esc(safeSrc)}"></video><div>${esc(d.fileName||"فيديو")}</div></div>`
+      : safeSrc
       ? `<div class="bubble-text"><a href="${esc(safeSrc)}" target="_blank" rel="noopener" style="color:var(--gold);display:flex;align-items:center;gap:7px;">
            <i class="fa-solid ${fIcon}"></i>
            <span>${esc(d.fileName||"ملف")}</span>

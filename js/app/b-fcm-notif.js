@@ -1,3 +1,4 @@
+import { uploadMedia } from '../media-upload.js';
 /* split from js/app-main.js (block B_fcm_notif) — verbatim code; cross-module state writes go through __set_* helpers */
 import { addDoc, collection, doc, getDoc, getDocsFromServer, limit, onSnapshot, query, runTransaction, serverTimestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { fcmSupported, showForegroundNotif } from "../notif-permission.js";
@@ -310,18 +311,8 @@ window._startNotifListener = _startNotifListener;
 /* FCM END */
 
 async function uploadToCloudinary(file) {
-  if (file.type.startsWith("video/")) throw new Error("رفع الفيديوهات غير مسموح");
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("upload_preset", "university_upload");
-  const response = await fetch(
-    "https://api.cloudinary.com/v1_1/dnbvvfita/auto/upload",
-    { method: "POST", body: formData }
-  );
-  const data = await response.json();
-  if (!data.secure_url) throw new Error("Cloudinary upload failed");
-  const isPDF = file.type === "application/pdf" || file.name.endsWith(".pdf");
-  return isPDF ? data.secure_url.replace("/image/upload/", "/raw/upload/") : data.secure_url;
+ const data=await uploadMedia(file);
+ return data.secure_url;
 }
 
 export function __set__fcmNotifsUnsub(v){ _fcmNotifsUnsub = v; return v; }
