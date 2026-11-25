@@ -53,7 +53,7 @@ test('every use of confirm( in app modules imports the local confirm (it shadows
   const code=src.replace(/\/\*[\s\S]*?\*\//g,'').replace(/(^|[^:])\/\/.*$/gm,'$1');
   const uses=/(?<![\w$.])confirm\s*\(/.test(code);
   const defines=/function\s+confirm\s*\(/.test(code);
-  const imports=/import\s*\{[^}]*\bconfirm\b[^}]*\}\s*from\s+"\.\/e-toast-confirm\.js"/.test(src);
+  const imports=/import\s*\{[^}]*\bconfirm\b[^}]*\}\s*from\s+"(?:\.\/|\/s\/release\/[a-f0-9]{64}\/js\/app\/)e-toast-confirm\.js"/.test(src);
   if(uses&&!defines)assert.ok(imports,f+' uses confirm( without importing it');
  }
 });
