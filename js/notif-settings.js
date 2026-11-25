@@ -45,7 +45,8 @@
     _clearUnsaved();
     _prefsUid = null; _prefsLoadedAt = 0;
     _prefsInflight = null; _prefsInflightUid = null;
-    if (payload) {
+    if(payload&&(window.__BLISS_NEWS_MODE!=='firebase'))delete payload.news;
+    if (payload&&Object.keys(payload).length) {
       (async () => {
         try {
           const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
@@ -68,14 +69,14 @@
     _prefsOwner = cu;
   }
   function _markDirty(keys) {
-    if (!window.currentUser?.uid || !window.db) return;
+    if (!window.currentUser?.uid || (!window.db&&window.__BLISS_NEWS_MODE==='firebase')) return;
     keys.forEach(k => { _dirty[k] = true; });
   }
 
   /* Load prefs from Firestore for current user
      force === true → تجاهل الكاش واقرأ من السيرفر */
   async function _loadPrefs(uid, force) {
-    if (!uid || !window.db) return;
+    if (!uid || (!window.db&&window.__BLISS_NEWS_MODE==='firebase')) return;
     if (_prefsOwner !== null && _prefsOwner !== uid) _resetPrefsState(_prefsOwner);
     _prefsOwner = uid;
 
@@ -93,6 +94,7 @@
     }
 
     const gen = _prefsGen;
+    const newsLoad=(window.__BLISS_NEWS_MODE!=='firebase')?NewsAPI.request('prefs').then(result=>{if(gen===_prefsGen&&window.currentUser?.uid===uid&&!_dirty.news&&!_writing.news)_prefs.news=result.enabled;}).catch(()=>{}):Promise.resolve();
     const p = (async () => {
       try {
         const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
@@ -102,13 +104,14 @@
         if (snap.exists()) {
           const d = snap.data();
           // مفتاح غيّره المستخدم (أو قيد الكتابة) ما بيتكتبش فوقه بقيمة السيرفر القديمة
-          NS_KEYS.forEach(k => { if (typeof d[k] === "boolean" && !_dirty[k] && !_writing[k]) _prefs[k] = d[k]; });
+          NS_KEYS.forEach(k => { if(k==='news'&&(window.__BLISS_NEWS_MODE!=='firebase'))return; if (typeof d[k] === "boolean" && !_dirty[k] && !_writing[k]) _prefs[k] = d[k]; });
         }
         // مدة الكاش تبدأ فقط بعد قراءة ناجحة من السيرفر (مش من الكاش المحلي) — مستند غير موجود = نجاح (الافتراضيات)
         if (snap.metadata && snap.metadata.fromCache === false) {
           _prefsUid = uid; _prefsLoadedAt = Date.now();
         }
       } catch(e) {}
+      await newsLoad;
     })();
     _prefsInflight = p; _prefsInflightUid = uid;
     try { await p; } finally {
@@ -126,24 +129,25 @@
     if (!keys.length) return null;
     const payload = {};
     keys.forEach(k => { payload[k] = _prefs[k]; delete _dirty[k]; _writing[k] = true; });
-    let ok = false;
-    try {
-      const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-      await setDoc(doc(window.db, "users", uid, "settings", "notifPrefs"), payload, { merge: true });
-      ok = true;
-    } catch(e) {}
-    // نفس جلسة الحساب فقط: لو فشلت الكتابة نرجّع المفاتيح "غير محفوظة" (بتتحاول تاني مع أول حفظ جاي)،
-    // ولو الحساب اتبدّل خلال الكتابة بنتجاهل النتيجة (مفيش تسريب لحساب تاني)
-    if (gen === _prefsGen) {
-      keys.forEach(k => { delete _writing[k]; if (!ok) _dirty[k] = true; });
+    const saved=new Set();
+    if((window.__BLISS_NEWS_MODE!=='firebase')&&Object.hasOwn(payload,'news')){
+      try{if(gen!==_prefsGen||window.currentUser?.uid!==uid)throw Error('news-account-changed');await NewsAPI.request('prefs',{method:'POST',body:{enabled:payload.news}});saved.add('news');}catch{}
+      delete payload.news;
     }
+    if(Object.keys(payload).length){try{
+      const {doc,setDoc}=await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+      await setDoc(doc(window.db,"users",uid,"settings","notifPrefs"),payload,{merge:true});Object.keys(payload).forEach(k=>saved.add(k));
+    }catch{}}
+    if(gen===_prefsGen)keys.forEach(k=>{delete _writing[k];if(!saved.has(k))_dirty[k]=true;});
+    const ok=keys.every(k=>saved.has(k));
+    if(!ok&&gen===_prefsGen)window.toast?.(saved.size?'حُفظ جزء من الإعدادات. الباقي لم يُحفظ، حاول مرة أخرى.':'تعذر حفظ الإعدادات. حاول مرة أخرى.','error');
     return ok;
   }
 
   /* Save changed prefs only (merge) — بيكتب المفاتيح اللي غيّرها المستخدم بس */
   async function _savePrefs() {
     const uid = window.currentUser?.uid;
-    if (!uid || !window.db) return;
+    if (!uid || (!window.db&&window.__BLISS_NEWS_MODE==='firebase')) return;
     const el = document.getElementById("nsmSaving");
     if (el) { el.style.opacity = "1"; }
     clearTimeout(_savingTimer);
@@ -163,7 +167,7 @@
   window._notifPrefsFlush = async function (timeoutMs = 1500) {
     try {
       const uid = _pendingSaveUid;
-      if (!uid || !window.db) return null;
+      if (!uid || (!window.db&&window.__BLISS_NEWS_MODE==='firebase')) return null;
       if (_prefsOwner !== uid || window.currentUser?.uid !== uid) return false;
       clearTimeout(_savingTimer);
       _pendingSaveUid = null;

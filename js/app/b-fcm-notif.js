@@ -286,6 +286,7 @@ function _startNotifListener(uid) {
       if (_fcmShownIds.has(docId)) continue;
       _fcmShownIds.add(docId);
       const d = change.doc.data(), data = d.data || {};
+      if(data.type==='news'&&(window.__BLISS_NEWS_MODE!=='firebase'))continue;
       if (data.senderUid && data.senderUid === uid) { updateDoc(change.doc.ref, { read: true }).catch(() => {}); continue; }
       if (data.chatType === "private" && _currentChatId === data.senderUid) { updateDoc(change.doc.ref, { read: true }).catch(() => {}); continue; }
       showInAppNotif(d.title, d.body, data, (dat) => {

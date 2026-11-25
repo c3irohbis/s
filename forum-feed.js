@@ -1,10 +1,10 @@
 /* split from js/app-main.js (block P_content_loaders_forum) — verbatim code; cross-module state writes go through __set_* helpers */
 import { collection, deleteDoc, doc, getDoc, limit, limitToLast, startAfter, endBefore, onSnapshot, orderBy, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { db } from "/s/release/e755af5bd3f4b2281848fc6724bdc745aff539c9187cea91c952e31b2c5fadf4/js/app/a-init-config.js";
-import { AUDIT_ACTIONS, writeAuditLog } from "/s/release/e755af5bd3f4b2281848fc6724bdc745aff539c9187cea91c952e31b2c5fadf4/js/app/c-upload-audit-stub.js";
-import { isAdmin, isOwner } from "/s/release/e755af5bd3f4b2281848fc6724bdc745aff539c9187cea91c952e31b2c5fadf4/js/app/d-state-roles-email.js";
-import { confirm } from "/s/release/e755af5bd3f4b2281848fc6724bdc745aff539c9187cea91c952e31b2c5fadf4/js/app/e-toast-confirm.js";
-import { esc } from "/s/release/e755af5bd3f4b2281848fc6724bdc745aff539c9187cea91c952e31b2c5fadf4/js/app/v-profile-cards-picctx.js";
+import { db } from "/s/release/1552aefdb33149ebe48fce171de6e2f59a2ace31864e4a0580862f5d22022462/js/app/a-init-config.js";
+import { AUDIT_ACTIONS, writeAuditLog } from "/s/release/1552aefdb33149ebe48fce171de6e2f59a2ace31864e4a0580862f5d22022462/js/app/c-upload-audit-stub.js";
+import { isAdmin, isOwner } from "/s/release/1552aefdb33149ebe48fce171de6e2f59a2ace31864e4a0580862f5d22022462/js/app/d-state-roles-email.js";
+import { confirm } from "/s/release/1552aefdb33149ebe48fce171de6e2f59a2ace31864e4a0580862f5d22022462/js/app/e-toast-confirm.js";
+import { esc } from "/s/release/1552aefdb33149ebe48fce171de6e2f59a2ace31864e4a0580862f5d22022462/js/app/v-profile-cards-picctx.js";
 /* ══════════════════════════════════════════
    CONTENT LOADERS
 ══════════════════════════════════════════ */
@@ -71,7 +71,7 @@ function _bariqRememberNews(key, docs, ctx) {
   })};
 }
 window.BariqLoadedNews = () => {
-  const ctx=_forumLiveCtx(), s=_bariqNewsSnapshot;
+  const ctx=_forumLiveCtx(), s=(window.__BLISS_NEWS_MODE!=='firebase')?window.__newsLoadedSnapshot:_bariqNewsSnapshot;
   if (!s || s.uid!==ctx.uid || s.world!==ctx.world) return null;
   return {at:s.at,world:s.world,rows:s.rows.map(x=>({...x}))};
 };
@@ -118,6 +118,7 @@ function _forumLiveCacheTrusted(m, count) {
 }
 
 function _forumLiveStop(key) {
+  if(key==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){window.NewsFeed?.stop();return;}
   const e = _forumLive[key];
   if(key==='news')_bariqNewsSnapshot=null;
   if (!e.active && !e.unsub) return;
@@ -200,6 +201,7 @@ function _forumLiveSync() {
   const canRun = !!(ctx.uid && db && !document.hidden);
   Object.keys(_forumLive).forEach(key => {
     const e = _forumLive[key];
+    if(key==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){window.NewsFeed?.sync();return;}
     if (!(canRun && _forumLiveShown(e))) { _forumLiveStop(key); e.failedSig = null; return; }
     // D9=A (مراجعة المالك نقطة 1): الكارت المفتوح لا يُعاد جلبه أبدًا — لا هنا ولا عبر أي استدعاء متكرر
     // (IntersectionObserver/visibilitychange أثناء الفتح). الفتح/الرجوع الحقيقي يمر بـ _forumLiveStop

@@ -70,7 +70,7 @@ function _bariqRememberNews(key, docs, ctx) {
   })};
 }
 window.BariqLoadedNews = () => {
-  const ctx=_forumLiveCtx(), s=_bariqNewsSnapshot;
+  const ctx=_forumLiveCtx(), s=(window.__BLISS_NEWS_MODE!=='firebase')?window.__newsLoadedSnapshot:_bariqNewsSnapshot;
   if (!s || s.uid!==ctx.uid || s.world!==ctx.world) return null;
   return {at:s.at,world:s.world,rows:s.rows.map(x=>({...x}))};
 };
@@ -117,6 +117,7 @@ function _forumLiveCacheTrusted(m, count) {
 }
 
 function _forumLiveStop(key) {
+  if(key==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){window.NewsFeed?.stop();return;}
   const e = _forumLive[key];
   if (!e.active && !e.unsub) return;
   e.gen++;                                   // أي callback قديم يتجاهل نفسه
@@ -219,6 +220,7 @@ function _forumLiveSync() {
   const canRun = !!(ctx.uid && db && !document.hidden);
   Object.keys(_forumLive).forEach(key => {
     const e = _forumLive[key];
+    if(key==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){window.NewsFeed?.sync();return;}
     if (!(canRun && _forumLiveShown(e))) { _forumLiveStop(key); e.failedSig = null; return; }
     // D9=A (مراجعة المالك نقطة 1): الكارت المفتوح لا يُعاد جلبه أبدًا — لا هنا ولا عبر أي استدعاء متكرر
     // (IntersectionObserver/visibilitychange أثناء الفتح). الفتح/الرجوع الحقيقي يمر بـ _forumLiveStop

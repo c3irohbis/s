@@ -1,3 +1,4 @@
+import {handleNews} from './news-routes.js';
 import {handleAuthority,drainAuthority} from './authority-routes.js';
 /* ══════════════════════════════════════════════════════════════════
    bliss-gateway — بوابة «بليس» (المرحلة 1: الأساس)
@@ -1116,6 +1117,7 @@ export default {
     if (isHealth) return ok(request, env, { ok: true }, { complete: true, count: 0, generatedAt: Date.now() }, { "Cache-Control": "no-store" });
 
     const ROUTES = {
+      "GET /v1/news/list":1,"POST /v1/news/mutate":1,"GET /v1/news/badge":1,"POST /v1/news/read":1,"GET /v1/news/prefs":1,"POST /v1/news/prefs":1,"GET /v1/news/notifications":1,"POST /v1/news/notifications":1,
       "GET /v1/authority":1,"POST /v1/authority":1,
       "GET /v1/content/instructions/badge":1,"POST /v1/content/instructions/read":1,"POST /v1/admin/content/instructions": 1, "POST /v1/media/upload": 1, "GET /v1/config": 1, "GET /v1/content/instructions": 1,
       "POST /v1/admin/sync/instructions": 1, "GET /v1/admin/reconcile/instructions": 1,
@@ -1147,6 +1149,12 @@ export default {
     try { user = await verifyToken(m[1], env.FIREBASE_PROJECT_ID); }
     catch (_) { return err(request, env, 401, "invalid-token"); }
     if (!rateLimit("uid:" + user.sub, 120)) return err(request, env, 429, "rate-limited");
+
+    if(url.pathname.startsWith('/v1/news/')){
+      const response=await handleNews(request,env,user,{enabled:(await readFlags(env)).news==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'news-backend');return r.data;}});
+      const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
+    }
+    if(cardRoute&&(await readFlags(env)).news==='supabase'&&cardRoute.card==='news')return err(request,env,410,'legacy-news-disabled');
 
     if(url.pathname==='/v1/authority') {
       const response=await handleAuthority(request,env,user,{rpc:async(name,body)=>{

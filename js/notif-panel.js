@@ -47,6 +47,15 @@
     _updateProfileBadge();
   };
 
+  window.addEventListener('news-inbox',e=>{
+    _notifs=_notifs.filter(n=>!n._news);
+    if(e.detail?.uid===window.currentUser?.uid)for(const n of e.detail.items||[])_notifs.push({id:'sqlnews_'+n.id,title:n.title,body:n.body+(n.removed?' (خبر محذوف)':''),data:{type:'news',sourceId:n.item_id},time:Date.parse(n.created_at),read:!!n.read_at,icon:'📰',_news:n.id});
+    _notifs.sort((a,b)=>b.time-a.time);_renderNotifs();_updateProfileBadge();
+  });
+  async function _newsAction(n,action){
+    if(!n?._news)return false;
+    try{await NewsAPI.request('notifications',{method:'POST',body:{action,id:n._news}});window.NewsNotifications?.refresh();return true;}catch{window.toast?.('تعذر حفظ الإشعار','error');return false;}
+  }
   /* ── Render ── */
   function _renderNotifs() {
     const list = document.getElementById("npNotifList");
@@ -139,9 +148,10 @@
   };
 
   /* ── Actions ── */
-  window._npClickItem = function(id) {
+  window._npClickItem = async function(id) {
     const n = _notifs.find(x => x.id === id);
     if (!n) return;
+    if(n._news&&!await _newsAction(n,'read'))return;
     n.read = true;
     _renderNotifs();
     _updateProfileBadge();
@@ -152,25 +162,28 @@
       // default navigation by type
       const d = n.data || {};
       if (d.chatType === "private" && d.senderUid) { try { openDMChat(d.senderUid); window.closeNotifPanel(); } catch(e) {} }
-      else if (d.type === "news")     { try { openForumSection("tab-news","tab-news-content"); window.closeNotifPanel(); } catch(e) {} }
+      else if (d.type === "news")     { try { if(n._news){window.showPage?.('page-home');window.goTab?.('tab-forum');}openForumSection("tab-news","tab-news-content"); window.closeNotifPanel(); } catch(e) {} }
       else if (d.type === "lectures") { try { openForumSection("tab-lectures","tab-lectures-content"); window.closeNotifPanel(); } catch(e) {} }
       else if (d.type === "exams")    { try { openForumSection("tab-exams","tab-exams-content"); window.closeNotifPanel(); } catch(e) {} }
       else if (d.type === "sections") { try { openForumSection("tab-sections","tab-sections-content"); window.closeNotifPanel(); } catch(e) {} }
     }
   };
 
-  window._npMarkRead = function(id) {
+  window._npMarkRead = async function(id) {
     const n = _notifs.find(x => x.id === id);
+    if(n?._news&&!await _newsAction(n,'read'))return;
     if (n) { n.read = true; _renderNotifs(); _updateProfileBadge(); }
   };
 
-  window._npDeleteItem = function(id) {
+  window._npDeleteItem = async function(id) {
+    const n=_notifs.find(x=>x.id===id);if(n?._news&&!await _newsAction(n,'dismiss'))return;
     _notifs = _notifs.filter(x => x.id !== id);
     _renderNotifs();
     _updateProfileBadge();
   };
 
-  window.npClearAll = function() {
+  window.npClearAll = async function() {
+    const items=_notifs.slice();for(const n of items.filter(x=>x._news))if(!await _newsAction(n,'dismiss'))return;
     _notifs = [];
     _renderNotifs();
     _updateProfileBadge();
