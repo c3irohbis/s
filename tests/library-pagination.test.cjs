@@ -1,44 +1,9 @@
-const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const vm=require('node:vm');const path=require('node:path');
-const s=fs.readFileSync(path.join(__dirname,'../js/library.js'),'utf8');
+const{test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const repo=path.join(__dirname,'..'),html=fs.readFileSync(path.join(repo,'index.html'),'utf8');const link=/<script[^>]+src="([^"]*library-feed\.js[^" ]*)"[^>]*>/.exec(html);if(!link)throw Error('library override not served');assert.match(link[0],/type="module"/);const s=fs.readFileSync(path.join(repo,link[1].split('?')[0].replace(/^\/s\//,'')),'utf8').replace(/^import .*;$/gm,'');
+function env(){const els={},reads=[],old=[];let stops=0;const el=()=>({children:[],style:{},appendChild(x){this.children.push(x);if(x.id)els[x.id]=x},addEventListener(t,f){this.click=f},remove(){delete els[this.id]},set innerHTML(v){this.html=v;this.children=[]},get innerHTML(){return this.html||''}});els.libSubjectGrid=el();const ctx={uid:'u',world:'w',sig:'u:w'};const e={URL,Map,Set,Date,console,navigator:{onLine:true},localStorage:{getItem:()=>null,setItem(){}},window:{db:{},currentUser:{uid:'u'},_forumLiveCtx:()=>ctx},document:{getElementById:id=>els[id],createElement:el},collection:(db,col)=>({col}),where:(...a)=>({where:a}),orderBy:(...a)=>({order:a}),limit:n=>({limit:n}),startAfter:d=>({after:d.id}),endBefore:d=>({before:d.id}),limitToLast:n=>({last:n}),query:(...a)=>a,onSnapshot:(q,o,fn)=>{reads.push(q);old.push(fn);return()=>stops++}};vm.createContext(e);vm.runInContext(s+'\n_libApplyData=()=>_libRenderLoadMore();',e);return{e,ctx,els,reads,old,stops:()=>stops,run:t=>vm.runInContext(t,e)}}
+const doc=id=>({id:String(id),data:()=>({worldId:'w'})});const snap=docs=>({docs,metadata:{fromCache:false,hasPendingWrites:false},docChanges:()=>[1]});
+test('actual served library retains one page60 and cursor navigation stays bounded',()=>{const x=env();x.e.window._libLiveStart(x.ctx);assert.equal(x.reads[0].at(-1).limit,60);x.old[0](snap(Array.from({length:60},(_,i)=>doc(i))));assert.equal(x.run('_libAllDocs.length'),60);x.els.libPageNav.children[1].click();assert.equal(x.stops(),1);assert.equal(x.run('_libAllDocs.length'),0);assert.equal(x.reads[1].at(-2).after,'59');assert.equal(x.reads[1].at(-1).limit,60);x.old[1](snap([doc(60)]));assert.equal(x.run('_libAllDocs.length'),1);x.els.libPageNav.children[2].click();assert.equal(x.reads[2].at(-2).before,'60');assert.equal(x.reads[2].at(-1).last,60);assert.equal(x.reads.length-x.stops(),1);});
+test('stopped or wrong account/world snapshots cannot restore data',()=>{const x=env();x.e.window._libLiveStart(x.ctx);const fn=x.old[0];x.e.window.currentUser={uid:'v'};fn(snap([doc(1)]));assert.equal(x.run('_libAllDocs.length'),0);x.e.window.currentUser={uid:'u'};x.e.window._forumLiveCtx=()=>({uid:'u',world:'other',sig:'u:other'});fn(snap([doc(1)]));assert.equal(x.run('_libAllDocs.length'),0);
+x.e.window._libLiveStop();fn(snap([doc(1)]));assert.equal(x.run('_libAllDocs.length'),0);assert.equal(x.stops(),1);});
 
-test('live lectures listener is bounded by the page limit',()=>{
-  assert.ok(s.includes('onSnapshot, limit }'),'limit imported');
-  assert.ok(s.includes('orderBy("createdAt", "desc"), limit(_libLiveLimit)'),'query carries the limit');
-  assert.ok(s.includes('const _LIB_PAGE       = 60;'),'page size constant');
-  assert.ok(s.includes('_libMayHaveMore = snap.docs.length >= _libLiveLimit'),'full page sets mayHaveMore');
-  assert.ok(s.includes('_libLiveLimit = _LIB_PAGE; _libMayHaveMore = false;'),'limit resets on account/world change');
-});
-
-test('load-more button lifecycle and listener growth',()=>{
-  const a=s.indexOf('/* ── ترقيم الصفحات'), b=s.indexOf('// يعرض _libAllDocs الحالية');
-  assert.ok(a>0&&b>a,'slice bounds');
-  const stateAndRender=s.slice(a,b);
-  const loadMore=s.slice(s.indexOf('// زرار "عرض المزيد"'), s.indexOf('function _libLiveStop'));
-  const calls=[];
-  const mk=()=>({kids:[],removed:false,style:{},appendChild(c){this.kids.push(c)},remove(){this.removed=true},addEventListener(t,f){this._click=f},disabled:false,textContent:''});
-  const grid=mk();
-  const doc={_btn:null,getElementById(id){if(id==='libSubjectGrid')return grid;if(id==='libLoadMoreBtn')return this._btn;return null},createElement(){this._btn=mk();return this._btn}};
-  const ctx={document:doc,_libLiveCtx:{uid:'u1',world:'is_2',sig:'x'},_libLiveStop:()=>calls.push('stop'),_libLiveStart:()=>calls.push('start')};
-  vm.createContext(ctx);
-  vm.runInContext(stateAndRender+loadMore,ctx);
-  // hidden while no more pages
-  vm.runInContext('_libRenderLoadMore()',ctx);
-  assert.equal(doc._btn,null,'no button without more pages');
-  // appears when a full page was confirmed
-  vm.runInContext('_libMayHaveMore = true; _libRenderLoadMore()',ctx);
-  assert.ok(doc._btn,'button created');
-  assert.equal(doc._btn.textContent,'عرض المزيد من المحاضرات');
-  assert.ok(grid.kids.includes(doc._btn),'appended to grid');
-  // click grows the page and recreates the listener once
-  vm.runInContext('_libLoadMore()',ctx);
-  assert.equal(vm.runInContext('_libLiveLimit',ctx),120,'limit grew by one page');
-  assert.deepEqual(calls,['stop','start'],'listener recreated');
-  assert.equal(doc._btn.disabled,true,'disabled while loading');
-  assert.equal(doc._btn.textContent,'جارٍ التحميل…');
-  // double click while loading is a no-op
-  vm.runInContext('_libLoadMore()',ctx);
-  assert.equal(vm.runInContext('_libLiveLimit',ctx),120,'no double growth');
-  // hides again when the next page comes back short
-  vm.runInContext('_libLoadingMore = false; _libMayHaveMore = false; _libRenderLoadMore()',ctx);
-  assert.equal(doc._btn.removed,true,'button removed when exhausted');
-});
+test('empty older page offers latest without invalid null cursors',()=>{const x=env();x.e.window._libLiveStart(x.ctx);x.old[0](snap(Array.from({length:60},(_,i)=>doc(i))));x.els.libPageNav.children[1].click();x.old[1](snap([]));const nav=x.els.libPageNav;assert.equal(nav.children[1].disabled,true);assert.equal(nav.children[2].disabled,true);assert.equal(nav.children[3].disabled,false);nav.children[3].click();assert.equal(x.reads.at(-1).at(-1).limit,60);assert.equal(x.reads.at(-1).some(v=>v?.after||v?.before),false);});
