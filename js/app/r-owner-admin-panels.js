@@ -1,3 +1,4 @@
+import { AuthorityClient } from "../authority-client.js";
 /* split from js/app-main.js (block R_owner_admin_panels) — verbatim code; cross-module state writes go through __set_* helpers */
 import { collection, doc, getCountFromServer, getDocs, query, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { ROLES, db } from "./a-init-config.js";
@@ -121,15 +122,16 @@ function renderOwnerUsers(users) {
         if (!ok) return;
         banBtn.disabled = true; banBtn.textContent = "جاري...";
         try {
-          await updateDoc(doc(db, "users", uid), { isBanned: !u.isBanned });
-          window.AccountArchive?.log(uid, "ban", u.isBanned ? "banned" : "unbanned", u.isBanned ? "unbanned" : "banned");
+          if (AuthorityClient.enabled()) await AuthorityClient.mutate(currentUser, uid, "ban", !u.isBanned);
+          else await updateDoc(doc(db, "users", uid), { isBanned: !u.isBanned });
+          try { window.AccountArchive?.log(uid, "ban", u.isBanned ? "banned" : "unbanned", u.isBanned ? "unbanned" : "banned"); } catch (e) { if (!AuthorityClient.enabled()) throw e; }
           // ── Audit Log ──
           await writeAuditLog(
             u.isBanned ? AUDIT_ACTIONS.UNBAN_USER : AUDIT_ACTIONS.BAN_USER,
             { method: 'account_ban' },
             uid,
             u.name || '—'
-          );
+          ).catch(() => { if (!AuthorityClient.enabled()) throw Error('audit-failed'); console.warn('Compatibility audit not saved'); });
           toast(u.isBanned ? "تم رفع الحظر" : "تم الحظر");
           loadOwnerUsers(); loadOwnerStats();
         } catch(e) { toast("فشل التحديث","error"); banBtn.disabled=false; }
@@ -175,15 +177,16 @@ function renderOwnerUsers(users) {
           if (!ok) return;
           roleBtn.disabled = true; roleBtn.textContent = "جاري...";
           try {
-            await updateDoc(doc(db, "users", uid), { role: newRole });
-            window.AccountArchive?.log(uid, "role", uRole, newRole);
+            if (AuthorityClient.enabled()) await AuthorityClient.mutate(currentUser, uid, "role", newRole);
+            else await updateDoc(doc(db, "users", uid), { role: newRole });
+            try { window.AccountArchive?.log(uid, "role", uRole, newRole); } catch (e) { if (!AuthorityClient.enabled()) throw e; }
             // ── Audit Log ──
             await writeAuditLog(
               isCurrentlyAdmin ? AUDIT_ACTIONS.DEMOTE_ADMIN : AUDIT_ACTIONS.PROMOTE_ADMIN,
               { oldRole: uRole, newRole },
               uid,
               u.name || '—'
-            );
+            ).catch(() => { if (!AuthorityClient.enabled()) throw Error('audit-failed'); console.warn('Compatibility audit not saved'); });
             toast(`تم تغيير الصلاحية إلى "${label}"`);
             loadOwnerUsers(); loadOwnerStats();
           } catch(e) { toast("فشل تغيير الصلاحية","error"); roleBtn.disabled=false; }
@@ -285,15 +288,16 @@ function renderAdminUsers(users) {
         if (!ok) return;
         banBtn.disabled = true; banBtn.textContent = "جاري...";
         try {
-          await updateDoc(doc(db, "users", uid), { isBanned: !u.isBanned });
-          window.AccountArchive?.log(uid, "ban", u.isBanned ? "banned" : "unbanned", u.isBanned ? "unbanned" : "banned");
+          if (AuthorityClient.enabled()) await AuthorityClient.mutate(currentUser, uid, "ban", !u.isBanned);
+          else await updateDoc(doc(db, "users", uid), { isBanned: !u.isBanned });
+          try { window.AccountArchive?.log(uid, "ban", u.isBanned ? "banned" : "unbanned", u.isBanned ? "unbanned" : "banned"); } catch (e) { if (!AuthorityClient.enabled()) throw e; }
           // ── Audit Log ──
           await writeAuditLog(
             u.isBanned ? AUDIT_ACTIONS.UNBAN_USER : AUDIT_ACTIONS.BAN_USER,
             { method: 'account_ban', byRole: 'admin' },
             uid,
             u.name || '—'
-          );
+          ).catch(() => { if (!AuthorityClient.enabled()) throw Error('audit-failed'); console.warn('Compatibility audit not saved'); });
           toast(u.isBanned ? "تم رفع الحظر" : "تم الحظر");
           loadAdminUsers();
         } catch(e) {

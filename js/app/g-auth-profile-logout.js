@@ -1,3 +1,4 @@
+import { AuthorityClient } from "../authority-client.js";
 /* split from js/app-main.js (block G_auth_profile_logout) — verbatim code; cross-module state writes go through __set_* helpers */
 import { signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { clearIndexedDbPersistence, doc, serverTimestamp, setDoc, terminate, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -18,7 +19,9 @@ import { __set__selfListenerUnsub, _selfListenerUnsub } from "./t-self-listener.
 async function _createUserProfile(user, { name, gender, worldId }) {
   const uid  = user.uid;
   const role = uid === OWNER_UID ? ROLES.OWNER : ROLES.USER;
-  await setDoc(doc(db, "users", uid), {
+  if (AuthorityClient.enabled()) {
+    await AuthorityClient.provision(user, { name, gender, worldId });
+  } else await setDoc(doc(db, "users", uid), {
     uid, name, email: user.email, role,
     publicId:  "",
     photo:     "",
@@ -66,6 +69,8 @@ window._bisAuthCore = {
    AUTH — LOGOUT
 ══════════════════════════════════════════ */
 async function doLogout() {
+  try { window.__insCaptureAuth?.revoke(); } catch (_) {}
+  try { void window.InstructionsModule?.capture?.logout().catch(() => {}); } catch (_) {}
   // حفظ أي تغيير معلّق في تفضيلات الإشعارات قبل ما الحساب يخرج (بحد أقصى مهلة داخلية؛ أي فشل ما بيوقفش الخروج)
   try { await window._notifPrefsFlush?.(); } catch(e) {}
 
