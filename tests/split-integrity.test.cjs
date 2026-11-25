@@ -11,23 +11,25 @@ const strip=u=>u.split('?')[0].split('#')[0];
 test('every local script/link target in index.html exists',()=>{
  const urls=[...html.matchAll(/<(?:script|link)\b[^>]*?(?:src|href)="([^"]+)"/g)].map(m=>m[1]).filter(u=>!/^(https?:|data:|#)/.test(u));
  assert.ok(urls.length>80);
- for(const u of urls)assert.ok(fs.existsSync(path.join(root,strip(u))),'missing '+u);
+ for(const u of urls){const base=/<base\s+href="([^"]+)"/.exec(html)?.[1]||'/s/';const resolved=new URL(u,'https://test'+base);assert.ok(resolved.pathname.startsWith('/s/'));assert.ok(fs.existsSync(path.join(root,decodeURIComponent(resolved.pathname.slice(3)))),'missing '+u);}
 });
 test('no inline module script remains; inline scripts are only the allowed ones',()=>{
  const inl=[...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)].filter(m=>!/\bsrc=/.test(m[1]));
+ assert.ok(!inl.some(m=>/\btype=["']module["']/.test(m[1])),'no inline modules');
  const kinds=inl.map(m=>/importmap/.test(m[1])?'importmap':/function ownerToggleSection/.test(m[2])?'ownerToggle':/serviceWorker/.test(m[2])?'swRegister':'OTHER');
- assert.deepEqual(kinds.sort(),['importmap','ownerToggle','swRegister']);
+ assert.deepEqual(kinds.sort(),['importmap','ownerToggle']);
 });
 test('main module keeps its place in the load order',()=>{
- const pos=s=>{const i=html.indexOf(s);assert.ok(i>0,s);return i};
+ const scripts=[...html.replace(/<!--[\s\S]*?-->/g,'').matchAll(/<script\b([^>]*)>/g)].map(m=>({attrs:m[1],src:/\bsrc=["']([^"']+)/.exec(m[1])?.[1]||''}));
+ const pos=s=>{const i=scripts.findIndex(x=>x.src.split('?')[0]===s);assert.ok(i>=0,s);return i};
  assert.ok(pos('js/chat-select.js')<pos('js/pin-message.js'));
  assert.ok(pos('js/pin-message.js')<pos('js/chat-backgrounds.js'));
  assert.ok(pos('js/chat-backgrounds.js')<pos('js/world-model.js'));
- assert.ok(pos('js/world-model.js')<pos('<script type="module" src="js/app-main.js'));
- assert.ok(pos('<script type="module" src="js/app-main.js')<pos('<script type="module" src="js/auth-bridge.js"'));
+ assert.ok(pos('js/world-model.js')<pos('js/app-main.js'));
+ assert.ok(pos('js/app-main.js')<pos('js/auth-bridge.js'));
  assert.ok(pos('js/newchat-ui.js')<pos('js/chat-newdesign-wiring.js'));
  assert.ok(pos('js/newchat-ui.js')>pos('js/mascot-override.js'));
- assert.ok(!/<script type="module" src="js\/app-main\.js[^>]*(defer|async)/.test(html));
+ const main=scripts[pos('js/app-main.js')];assert.ok(/\btype="module"/.test(main.attrs));assert.ok(!/\b(?:defer|async)\b/.test(main.attrs));
 });
 test('importmap is still the first script that can load modules',()=>{
  assert.ok(html.indexOf('type="importmap"')<html.indexOf('type="module"'));
@@ -81,13 +83,17 @@ test('every inline handler function is defined somewhere',()=>{
  const known=new Set(['confirm','stopPropagation']);
  assert.deepEqual(missing.filter(n=>!known.has(n)),[]);
 });
-test('service worker precaches app-main and cache version is moved forward',()=>{
- assert.ok(/'js\/app-main\.js'/.test(sw));
- const v=Number(/CACHE_VERSION = 'v(\d+)'/.exec(sw)[1]);
- assert.ok(v>=25);
- for(const m of sw.matchAll(/'((?:js|css|images)\/[^']+)'/g))assert.ok(fs.existsSync(path.join(root,m[1])),'precache missing '+m[1]);
+test('service worker embeds verified resource hashes including app-main',()=>{
+ const match=/const DIRECT_RELEASE = (.*);\n/.exec(sw);assert.ok(match);const m=JSON.parse(match[1]);const crypto=require('node:crypto');
+ assert.equal(m.entry.sha256,crypto.createHash('sha256').update(fs.readFileSync(path.join(root,'index.html'))).digest('hex'));
+ assert.ok(m.resources.some(r=>r.url.split('?')[0].endsWith('/js/app-main.js')));
+ const required=[...html.replace(/<!--[\s\S]*?-->/g,'').matchAll(/<(?:script|link)\b[^>]*?(?:src|href)="([^"]+)"/g)].map(x=>new URL(x[1],new URL(/<base\s+href="([^"]+)/.exec(html)[1],'https://test'))).filter(u=>u.origin==='https://test'&&/\.(?:js|css)$/.test(u.pathname));
+ for(const u of required)assert.ok(m.resources.some(r=>r.url===u.pathname.slice(3)+u.search),'manifest required '+u.href);
+ for(const r of m.resources){const bytes=fs.readFileSync(path.join(root,r.url.split('?')[0]));assert.equal(bytes.length,r.size);assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),r.sha256);}
+ assert.ok(!sw.includes('self.skipWaiting('));assert.ok(!sw.includes('clients.claim('));
 });
 test('window bridges of the main module are preserved',()=>{
  for(const n of ['showPage','goTab','openChatPage','openUsersManager','closeUsersManager','selectRoomIcon','openForumSection','closeForumSection','toggleProfSection','setActiveWorld','openPortal','openDmsPanel','copyMyPublicId','closeArchivePage','closeAiChatPage'])assert.ok(new RegExp('window\\.'+n+'\\s*=').test(main),n);
- assert.equal((main.match(/Object\.defineProperty\(window,/g)||[]).length,14);
+ const bridges=[...main.matchAll(/Object\.defineProperty\(window,\s*['"]([^'"]+)/g)].map(m=>m[1]).sort();
+ assert.deepEqual(bridges,['_lastSendTime','currentName','currentPhoto','msgUnsub','_isChatBanned','_acceptedPeers','_userCache','_currentChatId','_currentChatName','_currentChatPhoto','_isSending','_replyData','_ctxData','_ctxDocId','__insCaptureAuth'].sort());
 });
