@@ -65,6 +65,15 @@
     if(!n?._lec)return false;
     try{await LecturesAPI.request('notifications',{method:'POST',body:{action,id:n._lec}});window.LecturesNotifications?.refresh();return true;}catch{window.toast?.('تعذر حفظ الإشعار','error');return false;}
   }
+  window.addEventListener('exams-inbox',e=>{
+    _notifs=_notifs.filter(n=>!n._exm);
+    if(e.detail?.uid===window.currentUser?.uid)for(const n of e.detail.items||[])_notifs.push({id:'sqlexm_'+n.id,title:n.title,body:n.body+(n.removed?' (امتحان محذوف)':''),data:{type:'exams',sourceId:n.item_id},time:Date.parse(n.created_at),read:!!n.read_at,icon:'📅',_exm:n.id});
+    _notifs.sort((a,b)=>b.time-a.time);_renderNotifs();_updateProfileBadge();
+  });
+  async function _exmAction(n,action){
+    if(!n?._exm)return false;
+    try{await ExamsAPI.request('notifications',{method:'POST',body:{action,id:n._exm}});window.ExamsNotifications?.refresh();return true;}catch{window.toast?.('تعذر حفظ الإشعار','error');return false;}
+  }
   /* ── Render ── */
   function _renderNotifs() {
     const list = document.getElementById("npNotifList");
@@ -162,6 +171,7 @@
     if (!n) return;
     if(n._news&&!await _newsAction(n,'read'))return;
     if(n._lec&&!await _lecAction(n,'read'))return;
+    if(n._exm&&!await _exmAction(n,'read'))return;
     n.read = true;
     _renderNotifs();
     _updateProfileBadge();
@@ -173,6 +183,7 @@
       const d = n.data || {};
       if (d.chatType === "private" && d.senderUid) { try { openDMChat(d.senderUid); window.closeNotifPanel(); } catch(e) {} }
       else if (d.type === "news")     { try { if(n._news){window.showPage?.('page-home');window.goTab?.('tab-forum');}openForumSection("tab-news","tab-news-content"); window.closeNotifPanel(); } catch(e) {} }
+      else if (d.type === "exams" && n._exm) { try { window.showPage?.('page-home');window.goTab?.('tab-forum'); openForumSection("tab-exams","tab-exams-content"); window.closeNotifPanel(); } catch(e) {} }
       else if (d.type === "lectures") { try { if(n._lec){window.showPage?.('page-home');window.goTab?.('tab-forum');} openForumSection("tab-lectures","tab-lectures-content"); window.closeNotifPanel(); } catch(e) {} }
       else if (d.type === "exams")    { try { openForumSection("tab-exams","tab-exams-content"); window.closeNotifPanel(); } catch(e) {} }
       else if (d.type === "sections") { try { openForumSection("tab-sections","tab-sections-content"); window.closeNotifPanel(); } catch(e) {} }
@@ -183,18 +194,19 @@
     const n = _notifs.find(x => x.id === id);
     if(n?._news&&!await _newsAction(n,'read'))return;
     if(n?._lec&&!await _lecAction(n,'read'))return;
+    if(n?._exm&&!await _exmAction(n,'read'))return;
     if (n) { n.read = true; _renderNotifs(); _updateProfileBadge(); }
   };
 
   window._npDeleteItem = async function(id) {
-    const n=_notifs.find(x=>x.id===id);if(n?._news&&!await _newsAction(n,'dismiss'))return;if(n?._lec&&!await _lecAction(n,'dismiss'))return;
+    const n=_notifs.find(x=>x.id===id);if(n?._news&&!await _newsAction(n,'dismiss'))return;if(n?._lec&&!await _lecAction(n,'dismiss'))return;if(n?._exm&&!await _exmAction(n,'dismiss'))return;
     _notifs = _notifs.filter(x => x.id !== id);
     _renderNotifs();
     _updateProfileBadge();
   };
 
   window.npClearAll = async function() {
-    const items=_notifs.slice();for(const n of items.filter(x=>x._news))if(!await _newsAction(n,'dismiss'))return;for(const n of items.filter(x=>x._lec))if(!await _lecAction(n,'dismiss'))return;
+    const items=_notifs.slice();for(const n of items.filter(x=>x._news))if(!await _newsAction(n,'dismiss'))return;for(const n of items.filter(x=>x._lec))if(!await _lecAction(n,'dismiss'))return;for(const n of items.filter(x=>x._exm))if(!await _exmAction(n,'dismiss'))return;
     _notifs = [];
     _renderNotifs();
     _updateProfileBadge();

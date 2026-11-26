@@ -1,10 +1,10 @@
 /* split from js/app-main.js (block P_content_loaders_forum) — verbatim code; cross-module state writes go through __set_* helpers */
 import { collection, deleteDoc, doc, getDoc, limit, limitToLast, startAfter, endBefore, onSnapshot, orderBy, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { db } from "/s/release/4c85063a601c5f22b08a8741a6d1c5e18b82e7165b9942a2dfb9077d4ef8dc5f/js/app/a-init-config.js";
-import { AUDIT_ACTIONS, writeAuditLog } from "/s/release/4c85063a601c5f22b08a8741a6d1c5e18b82e7165b9942a2dfb9077d4ef8dc5f/js/app/c-upload-audit-stub.js";
-import { isAdmin, isOwner } from "/s/release/4c85063a601c5f22b08a8741a6d1c5e18b82e7165b9942a2dfb9077d4ef8dc5f/js/app/d-state-roles-email.js";
-import { confirm } from "/s/release/4c85063a601c5f22b08a8741a6d1c5e18b82e7165b9942a2dfb9077d4ef8dc5f/js/app/e-toast-confirm.js";
-import { esc } from "/s/release/4c85063a601c5f22b08a8741a6d1c5e18b82e7165b9942a2dfb9077d4ef8dc5f/js/app/v-profile-cards-picctx.js";
+import { db } from "/s/release/9c59d4cec8eca01d676d62afdc3f6b8486e7918325fb4d85e350293e978ddbc5/js/app/a-init-config.js";
+import { AUDIT_ACTIONS, writeAuditLog } from "/s/release/9c59d4cec8eca01d676d62afdc3f6b8486e7918325fb4d85e350293e978ddbc5/js/app/c-upload-audit-stub.js";
+import { isAdmin, isOwner } from "/s/release/9c59d4cec8eca01d676d62afdc3f6b8486e7918325fb4d85e350293e978ddbc5/js/app/d-state-roles-email.js";
+import { confirm } from "/s/release/9c59d4cec8eca01d676d62afdc3f6b8486e7918325fb4d85e350293e978ddbc5/js/app/e-toast-confirm.js";
+import { esc } from "/s/release/9c59d4cec8eca01d676d62afdc3f6b8486e7918325fb4d85e350293e978ddbc5/js/app/v-profile-cards-picctx.js";
 /* ══════════════════════════════════════════
    CONTENT LOADERS
 ══════════════════════════════════════════ */
@@ -119,6 +119,7 @@ function _forumLiveCacheTrusted(m, count) {
 
 function _forumLiveStop(key) {
   if(key==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){window.NewsFeed?.stop();return;}
+  if(key==='exams'&&(window.__BLISS_EXAMS_MODE!=='firebase')){window.ExamsFeed?.stop();return;}
   const e = _forumLive[key];
   if(key==='news')_bariqNewsSnapshot=null;
   if (!e.active && !e.unsub) return;
@@ -202,6 +203,7 @@ function _forumLiveSync() {
   Object.keys(_forumLive).forEach(key => {
     const e = _forumLive[key];
     if(key==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){window.NewsFeed?.sync();return;}
+    if(key==='exams'&&(window.__BLISS_EXAMS_MODE!=='firebase')){window.ExamsFeed?.sync();return;}
     if (!(canRun && _forumLiveShown(e))) { _forumLiveStop(key); e.failedSig = null; return; }
     // D9=A (مراجعة المالك نقطة 1): الكارت المفتوح لا يُعاد جلبه أبدًا — لا هنا ولا عبر أي استدعاء متكرر
     // (IntersectionObserver/visibilitychange أثناء الفتح). الفتح/الرجوع الحقيقي يمر بـ _forumLiveStop
