@@ -1,7 +1,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const vm=require('node:vm');
 const code=fs.readFileSync(path.join(__dirname,'../js/schedule-repository.js'),'utf8').replace(/^import[^\n]+\n/,'').replaceAll('export ','');
 test('schedule shares only complete active server snapshots and scopes account/world',async()=>{
- let calls=0,stops=0,callback,readResolve;const ctx={currentUser:{uid:'me'},collection:()=>({}),query:(...q)=>q,where:(...q)=>q,onSnapshot:(q,options,cb)=>{assert.equal(options.includeMetadataChanges,true);callback=cb;return()=>stops++},getDocs:()=>{calls++;return new Promise(r=>readResolve=r)}};
+ let calls=0,stops=0,callback,readResolve;const ctx={window:{__BLISS_STUDYSCHEDULE_MODE:'firebase'},currentUser:{uid:'me'},collection:()=>({}),query:(...q)=>q,where:(...q)=>q,onSnapshot:(q,options,cb)=>{assert.equal(options.includeMetadataChanges,true);callback=cb;return()=>stops++},getDocs:()=>{calls++;return new Promise(r=>readResolve=r)}};
  vm.createContext(ctx);vm.runInContext(code,ctx);const db={},received=[];
  const stop=ctx.subscribeSchedule(db,'a','me',s=>received.push(s));const snap={metadata:{fromCache:false,hasPendingWrites:false},docs:[]};callback(snap);
  assert.equal(await ctx.getSchedule(db,'a','me'),snap);assert.equal(calls,0);
