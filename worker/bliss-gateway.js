@@ -1,4 +1,5 @@
 import {handleSheets} from './sheets-routes.js';
+import {handleLectures} from './lectures-routes.js';
 import {handleNews} from './news-routes.js';
 import {handleAuthority,drainAuthority} from './authority-routes.js';
 /* ══════════════════════════════════════════════════════════════════
@@ -1120,6 +1121,7 @@ export default {
 
     const ROUTES = {
       "GET /v1/sheets/list":1,"POST /v1/sheets/mutate":1,"POST /v1/sheets/completion":1,"POST /v1/sheets/completion-record":1,"GET /v1/sheets/badge":1,"POST /v1/sheets/read":1,
+      "GET /v1/lectures/list":1,"POST /v1/lectures/mutate":1,"GET /v1/lectures/badge":1,"POST /v1/lectures/read":1,"GET /v1/lectures/prefs":1,"POST /v1/lectures/prefs":1,"GET /v1/lectures/notifications":1,"POST /v1/lectures/notifications":1,
       "GET /v1/news/list":1,"POST /v1/news/mutate":1,"GET /v1/news/badge":1,"POST /v1/news/read":1,"GET /v1/news/prefs":1,"POST /v1/news/prefs":1,"GET /v1/news/notifications":1,"POST /v1/news/notifications":1,
       "GET /v1/authority":1,"POST /v1/authority":1,
       "GET /v1/content/instructions/badge":1,"POST /v1/content/instructions/read":1,"POST /v1/admin/content/instructions": 1, "POST /v1/media/upload": 1, "GET /v1/config": 1, "GET /v1/content/instructions": 1,
@@ -1157,11 +1159,16 @@ export default {
       const response=await handleSheets(request,env,user,{enabled:(await readFlags(env)).sheets==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'sheets-backend');return r.data;}});
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
+    if(url.pathname.startsWith('/v1/lectures/')){
+      const response=await handleLectures(request,env,user,{enabled:(await readFlags(env)).lectures==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'lectures-backend');return r.data;}});
+      const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
+    }
     if(url.pathname.startsWith('/v1/news/')){
       const response=await handleNews(request,env,user,{enabled:(await readFlags(env)).news==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'news-backend');return r.data;}});
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
     if(cardRoute&&(await readFlags(env)).news==='supabase'&&cardRoute.card==='news')return err(request,env,410,'legacy-news-disabled');
+    if(cardRoute&&(await readFlags(env)).lectures==='supabase'&&cardRoute.card==='lectures')return err(request,env,410,'legacy-lectures-disabled');
 
     if(url.pathname==='/v1/authority') {
       const response=await handleAuthority(request,env,user,{rpc:async(name,body)=>{
