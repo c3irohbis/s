@@ -18,7 +18,7 @@
 
 .lf-sheet {
   position:relative; width:100%; height:100dvh; max-height:100dvh;
-  background:var(--bg2,#18181a); border-radius:0; border-top:none;
+  background:rgba(var(--t-bg-rgb), var(--glass-a)); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); border-radius:0; border-top:none;
   display:flex; flex-direction:column; overflow:hidden;
   animation:lf-slide-up .28s cubic-bezier(0.34,1.1,0.64,1);
 }

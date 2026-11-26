@@ -8,10 +8,10 @@
 
 .mil-overlay { position:absolute; inset:0; background:rgba(0,0,0,.6); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); animation:mil-fade-in .22s ease; }
 
-.mil-sheet { position:relative; z-index:1; width:100%; max-height:94dvh; background:var(--bg2,#18181a); border-radius:24px 24px 0 0; border-top:1.5px solid var(--border,#242426); display:flex; flex-direction:column; overflow:hidden; animation:mil-slide-up .28s cubic-bezier(0.34,1.1,0.64,1); }
+.mil-sheet { position:relative; z-index:1; width:100%; max-height:94dvh; background:rgba(var(--t-bg-rgb), var(--glass-a)); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); border-radius:24px 24px 0 0; border-top:1.5px solid var(--border,#242426); display:flex; flex-direction:column; overflow:hidden; animation:mil-slide-up .28s cubic-bezier(0.34,1.1,0.64,1); }
 
 /* ─── Header ─── */
-.mil-sheet-header { display:flex; align-items:center; gap:10px; padding:14px 16px 12px; border-bottom:1px solid var(--border,#242426); flex-shrink:0; background:var(--bg2,#18181a); }
+.mil-sheet-header { display:flex; align-items:center; gap:10px; padding:14px 16px 12px; border-bottom:1px solid var(--border,#242426); flex-shrink:0; }
 .mil-back-btn { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); border-radius:12px; color:var(--muted,#5a7499); font-family:inherit; font-size:13px; font-weight:700; padding:8px 14px; cursor:pointer; transition:all .18s; display:inline-flex; align-items:center; gap:6px; flex-shrink:0; }
 .mil-back-btn:hover { background:rgba(255,255,255,.12); color:var(--text,#e8edf5); }
 .mil-sheet-title { font-size:16px; font-weight:900; color:var(--gold,#c9a96e); display:flex; align-items:center; gap:8px; flex:1; }
