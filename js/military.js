@@ -23,12 +23,6 @@
   /* ─────────────────────────────────────────
      Firebase — نفس نمط الاستيراد الديناميكي المستخدم في grades.js
   ───────────────────────────────────────── */
-  const _FB = "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  async function _getFS() {
-    const db = window.db;
-    if (!db) throw new Error("Firebase غير متاح");
-    return { db, ...(await import(_FB)) };
-  }
 
   /* ─────────────────────────────────────────
      رفع موثق عبر Worker الخاص بالمشروع
@@ -78,6 +72,20 @@
   let _curFilter = "all";   // all | video | pdf | audio | other
   let _curSearch = "";
 
+  const _SQL_KEYS = ["title", "description", "type", "url", "fileName", "mimeType", "size", "cloudPublicId", "cloudResourceType", "sortOrder"];
+  function _sqlData(id, patch) {
+    const m = _materials.find(x => x.id === id);
+    if (!m) throw new Error("military-missing-item");
+    const o = {};
+    _SQL_KEYS.forEach(k => { if (m[k] !== undefined && m[k] !== null) o[k] = m[k]; });
+    o.pinned = !!m.pinnedAt;
+    return { ...o, ...patch };
+  }
+  function _revOf(id) {
+    const r = _materials.find(x => x.id === id)?.__revision;
+    if (!Number.isInteger(r) || r < 1) throw new Error("military-missing-revision");
+    return r;
+  }
   function _root() { return document.getElementById("military-app-root"); }
   function _isOwnerUser() { return !!(window.isOwner && window.isOwner()); }
 
@@ -104,10 +112,12 @@
   async function _startListener() {
     if (_unsub) return;
     try {
-      const { db, collection, onSnapshot } = await _getFS();
-      _unsub = onSnapshot(collection(db, "militaryMaterials"), snap => {
+      const uid = window.currentUser?.uid;
+      if (!uid || !window.MilitarySQL) throw new Error("military-unavailable");
+      _unsub = window.MilitarySQL.subscribe(uid, snap => {
         _materials = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         _renderList();
+        window.MilitarySQL.markViewed(uid);
       }, () => {
         const body = document.getElementById("milBody");
         if (body) body.innerHTML = `<div class="mil-empty-state"><div class="mil-empty-title">تعذّر تحميل المواد</div></div>`;
@@ -315,8 +325,7 @@
 
     try {
       const cloudData = await _uploadWithProgress(file, pct => { if (progBar) progBar.style.width = pct + "%"; });
-      const { db, collection, addDoc, serverTimestamp } = await _getFS();
-      await addDoc(collection(db, "militaryMaterials"), {
+      await window.MilitarySQL.create({
         title:        (titleInp && titleInp.value.trim()) || file.name,
         description:  (descInp && descInp.value.trim()) || "",
         type:         _detectType(file),
@@ -325,14 +334,12 @@
         mimeType:     file.type || "",
         size:         file.size || 0,
         sortOrder:    Date.now(),
-        pinnedAt:     null,
+        pinned:       false,
         // نُخزّن هذين الحقلين الآن (لا يُستخدَمان بعد) تجهيزًا لأي حذف فعلي من Cloudinary
         // مستقبلًا عبر Cloud Function — لأن حذف الملف الفعلي يتطلب API secret لا يجوز
         // وضعه في كود العميل (انظر ملاحظة الأمان في التقرير)
         cloudPublicId:     cloudData.public_id || "",
-        cloudResourceType: cloudData.resource_type || "",
-        createdAt:    serverTimestamp(),
-        createdBy:    window.currentUser?.uid || ""
+        cloudResourceType: cloudData.resource_type || ""
       });
       window.toast?.("تمت الإضافة بنجاح ✓");
       document.getElementById("milUploadCard")?.remove();
@@ -370,11 +377,7 @@
     const newTitle = (titleInp && titleInp.value.trim()) || "";
     if (!newTitle) { window.toast?.("العنوان مطلوب", "error"); return; }
     try {
-      const { db, doc, updateDoc } = await _getFS();
-      await updateDoc(doc(db, "militaryMaterials", id), {
-        title: newTitle,
-        description: (descInp && descInp.value.trim()) || ""
-      });
+      await window.MilitarySQL.update(id, _sqlData(id, { title: newTitle, description: (descInp && descInp.value.trim()) || "" }), _revOf(id));
       window.toast?.("تم الحفظ ✓");
       document.getElementById(`mil-edit-${id}`)?.remove();
     } catch (e) {
@@ -390,10 +393,7 @@
     const m = _materials.find(x => x.id === id);
     if (!m) return;
     try {
-      const { db, doc, updateDoc, serverTimestamp, deleteField } = await _getFS();
-      await updateDoc(doc(db, "militaryMaterials", id), {
-        pinnedAt: m.pinnedAt ? deleteField() : serverTimestamp()
-      });
+      await window.MilitarySQL.update(id, _sqlData(id, { pinned: !m.pinnedAt }), _revOf(id));
       window.toast?.(m.pinnedAt ? "تم إلغاء التثبيت" : "تم التثبيت");
     } catch (e) {
       window.toast?.("فشل التنفيذ", "error");
@@ -411,12 +411,10 @@
     if (i < 0 || j < 0 || j >= sorted.length) return;
     const a = sorted[i], b = sorted[j];
     try {
-      const { db, doc, updateDoc } = await _getFS();
       const aOrder = a.sortOrder || 0, bOrder = b.sortOrder || 0;
-      await Promise.all([
-        updateDoc(doc(db, "militaryMaterials", a.id), { sortOrder: bOrder }),
-        updateDoc(doc(db, "militaryMaterials", b.id), { sortOrder: aOrder })
-      ]);
+      if (aOrder === bOrder) { window.toast?.("فشل تغيير الترتيب", "error"); return; }
+      await window.MilitarySQL.update(a.id, _sqlData(a.id, { sortOrder: bOrder }), _revOf(a.id));
+      await window.MilitarySQL.update(b.id, _sqlData(b.id, { sortOrder: aOrder }), _revOf(b.id));
     } catch (e) {
       window.toast?.("فشل تغيير الترتيب", "error");
     }
@@ -429,8 +427,7 @@
     if (!_isOwnerUser()) return;
     if (!window.confirm("حذف هذه المادة من القائمة نهائيًا؟\n(ملاحظة: الملف نفسه يبقى محفوظًا على Cloudinary حاليًا، ولا يُحذف تلقائيًا)")) return;
     try {
-      const { db, doc, deleteDoc } = await _getFS();
-      await deleteDoc(doc(db, "militaryMaterials", id));
+      await window.MilitarySQL.remove(id, _revOf(id));
       window.toast?.("تم الحذف من القائمة");
     } catch (e) {
       window.toast?.("فشل الحذف", "error");

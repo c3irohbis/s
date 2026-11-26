@@ -17,7 +17,7 @@
      initFCM(user.uid, { app, db, getCurrentChatId: () => _currentChatId });
 ══════════════════════════════════════════ */
 
-import { doc, getDoc, setDoc, serverTimestamp } from "/s/release/6a0364fedf186fcefb5121be7450bb4556e1f1dcca46c02ecfda177ea8ca781a/js/firestore-safe.js?v=prefs-1";
+import { doc, getDoc, setDoc, serverTimestamp } from "/s/release/41d4bdfdb27959090cd47b0e9afce8e366960d78dc37f4d6b96a09ec8d1b0790/js/firestore-safe.js?v=prefs-1";
 
 const FCM_VAPID       = "BJ5GxVU8iTTXGDTCYXAq6og5luBQhgids-35u-R53gpO4LgEjo1NPHWl0rTpcDvJegD7ZIOMLxWA2teAlglt-Ng";
 const ANDROID_PACKAGE = "com.bariq.app";
