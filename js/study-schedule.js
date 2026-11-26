@@ -146,6 +146,7 @@
       await _loadAttLink();
       if (generation !== _loadGeneration || uid !== window.currentUser?.uid || _worldId !== _curWid()) return;
       _renderHome();
+      if (window.__BLISS_STUDYSCHEDULE_MODE !== 'firebase') window.StudyScheduleSQL.markViewed(_worldId, uid);
     } catch (e) {
       if (generation !== _loadGeneration) return;
       if (body) body.innerHTML = `<div class="ss-empty"><div class="ss-empty-title">تعذّر تحميل الجدول الدراسي</div></div>`;
@@ -158,6 +159,9 @@
      ▸ true → الحضور يقرأ حصصه من studySchedule مباشرة (بدون نسخ). false/غير موجود → النظام اليدوي الحالي.
   ───────────────────────────────────────── */
   const _curWid = () => (typeof window.activeWorldContext === "function") ? window.activeWorldContext() : null;
+  const _SQL_KEYS = ["subject", "day", "startTime", "endTime", "subject2", "startTime2", "endTime2", "reminderMinutes", "enabled"];
+  const _sqlData = (src) => { const o = {}; _SQL_KEYS.forEach((k) => { if (src[k] !== undefined && src[k] !== null) o[k] = src[k]; }); return o; };
+  const _revOf = (id) => { const r = _lectures.find((x) => x.id === id)?.__revision; if (!Number.isInteger(r) || r < 1) throw new Error('studyschedule-missing-revision'); return r; };
 
   async function _loadAttLink() {
     _attLink = null; _attLinkWid = null;
@@ -450,6 +454,15 @@
     const btn = document.querySelector(".ss-btn-primary");
     if (btn) btn.disabled = true;
     try {
+      const SQL = window.__BLISS_STUDYSCHEDULE_MODE !== 'firebase' ? window.StudyScheduleSQL : null;
+      if (SQL) {
+        const data = _sqlData(payload), _w = _curWid();
+        if (!_w) { window.toast?.("لا يوجد عالم نشط — تعذّر الحفظ", "error"); if (btn) btn.disabled = false; return; }
+        if (_draft.id) await SQL.update(_draft.id, data, _revOf(_draft.id), _w); else await SQL.create(data, _w);
+        window.toast?.("تم الحفظ بنجاح ✓");
+        await _load();
+        return;
+      }
       const { db, doc, addDoc, updateDoc, collection, serverTimestamp } = await _fs();
       payload.updatedAt = serverTimestamp();
       if (_draft.id) {
@@ -483,6 +496,11 @@
     const l = _lectures.find((x) => x.id === id);
     if (!l) return;
     try {
+      if (window.__BLISS_STUDYSCHEDULE_MODE !== 'firebase') {
+        await window.StudyScheduleSQL.update(id, _sqlData({ ...l, enabled: l.enabled === false }), _revOf(id), _curWid());
+        await _load();
+        return;
+      }
       const { db, doc, updateDoc, serverTimestamp } = await _fs();
       await updateDoc(doc(db, COL, id), { enabled: l.enabled === false, updatedAt: serverTimestamp(), updatedBy: window.currentUser?.uid || "" });
       await _load();
@@ -502,6 +520,12 @@
       }
     }
     try {
+      if (window.__BLISS_STUDYSCHEDULE_MODE !== 'firebase') {
+        await window.StudyScheduleSQL.remove(id, _revOf(id), _curWid());
+        window.toast?.("تم الحذف");
+        await _load();
+        return;
+      }
       const { db, doc, deleteDoc } = await _fs();
       await deleteDoc(doc(db, COL, id));
       window.toast?.("تم الحذف");

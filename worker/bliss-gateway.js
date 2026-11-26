@@ -2,6 +2,7 @@ import {handleSheets} from './sheets-routes.js';
 import {handleLectures} from './lectures-routes.js';
 import {handleExams} from './exams-routes.js';
 import {handleSections} from './sections-routes.js';
+import {handleStudySchedule} from './studyschedule-routes.js';
 import {handleNews} from './news-routes.js';
 import {handleAuthority,drainAuthority} from './authority-routes.js';
 /* ══════════════════════════════════════════════════════════════════
@@ -1126,6 +1127,7 @@ export default {
       "GET /v1/lectures/list":1,"POST /v1/lectures/mutate":1,"GET /v1/lectures/badge":1,"POST /v1/lectures/read":1,"GET /v1/lectures/prefs":1,"POST /v1/lectures/prefs":1,"GET /v1/lectures/notifications":1,"POST /v1/lectures/notifications":1,
       "GET /v1/exams/list":1,"POST /v1/exams/mutate":1,"GET /v1/exams/badge":1,"POST /v1/exams/read":1,"GET /v1/exams/prefs":1,"POST /v1/exams/prefs":1,"GET /v1/exams/notifications":1,"POST /v1/exams/notifications":1,
       "GET /v1/sections/list":1,"POST /v1/sections/mutate":1,"GET /v1/sections/badge":1,"POST /v1/sections/read":1,"GET /v1/sections/prefs":1,"POST /v1/sections/prefs":1,"GET /v1/sections/notifications":1,"POST /v1/sections/notifications":1,
+      "GET /v1/studyschedule/list":1,"POST /v1/studyschedule/mutate":1,"GET /v1/studyschedule/badge":1,"POST /v1/studyschedule/read":1,
       "GET /v1/news/list":1,"POST /v1/news/mutate":1,"GET /v1/news/badge":1,"POST /v1/news/read":1,"GET /v1/news/prefs":1,"POST /v1/news/prefs":1,"GET /v1/news/notifications":1,"POST /v1/news/notifications":1,
       "GET /v1/authority":1,"POST /v1/authority":1,
       "GET /v1/content/instructions/badge":1,"POST /v1/content/instructions/read":1,"POST /v1/admin/content/instructions": 1, "POST /v1/media/upload": 1, "GET /v1/config": 1, "GET /v1/content/instructions": 1,
@@ -1175,6 +1177,10 @@ export default {
       const response=await handleSections(request,env,user,{enabled:(await readFlags(env)).sections==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'sections-backend');return r.data;}});
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
+    if(url.pathname.startsWith('/v1/studyschedule/')){
+      const response=await handleStudySchedule(request,env,user,{enabled:(await readFlags(env)).studySchedule==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'studyschedule-backend');return r.data;}});
+      const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
+    }
     if(url.pathname.startsWith('/v1/news/')){
       const response=await handleNews(request,env,user,{enabled:(await readFlags(env)).news==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'news-backend');return r.data;}});
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
@@ -1183,6 +1189,7 @@ export default {
     if(cardRoute&&(await readFlags(env)).lectures==='supabase'&&cardRoute.card==='lectures')return err(request,env,410,'legacy-lectures-disabled');
     if(cardRoute&&(await readFlags(env)).exams==='supabase'&&cardRoute.card==='exams')return err(request,env,410,'legacy-exams-disabled');
     if(cardRoute&&(await readFlags(env)).sections==='supabase'&&cardRoute.card==='sections')return err(request,env,410,'legacy-sections-disabled');
+    if(cardRoute&&(await readFlags(env)).studySchedule==='supabase'&&cardRoute.card==='studySchedule')return err(request,env,410,'legacy-studyschedule-disabled');
 
     if(url.pathname==='/v1/authority') {
       const response=await handleAuthority(request,env,user,{rpc:async(name,body)=>{
