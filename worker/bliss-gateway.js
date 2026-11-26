@@ -9,6 +9,8 @@ import {handleMyDocs} from './mydocs-routes.js';
 import {handleAttendance} from './attendance-routes.js';
 import {handleNews} from './news-routes.js';
 import {handleAuthority,drainAuthority} from './authority-routes.js';
+import {handleAI} from './ai-routes.js';
+import {getAISnapshot,invalidateAllAISnapshots,cleanSnapshotField} from './ai-context.js';
 /* ══════════════════════════════════════════════════════════════════
    bliss-gateway — بوابة «بليس» (المرحلة 1: الأساس)
    المرحلة 1: GET /v1/health و GET /v1/config. المرحلة 2 (كارت التعليمات التجريبي):
@@ -35,7 +37,7 @@ import {handleAuthority,drainAuthority} from './authority-routes.js';
 
 const V = 1;
 // الكروت المعروفة (مفاتيح forum-badges). الافتراضي لأي كارت: firebase
-const CARD_KEYS = ["news","lectures","exams","sections","studySchedule","sheets","records","lostFound","military","instructions","tuition","mydocs","attendance"];
+const CARD_KEYS = ["news","lectures","exams","sections","studySchedule","sheets","records","lostFound","military","instructions","tuition","mydocs","attendance","ai"];
 const VALID_MODES = new Set(["firebase","shadow","gateway","supabase"]);
 const OWNER_PREVIEW = "gateway-owner"; // قيمة KV: بوابة للمالك فقط، وshadow للباقين (تدرّج 2.5)
 
@@ -1098,6 +1100,71 @@ async function handleMediaUpload(request,env,user) {
  } finally{clearTimeout(timeout);request.signal?.removeEventListener('abort',abort);try{await reader.cancel();}catch(_){}}
 }
 
+/* باني لقطة بريق لعالم واحد: يجمع قوائم الكروت العامة عبر معالجات البوابة نفسها كمالك
+   (صلاحية المالك تتجاوز العضوية — العالم الوحيد المضمون حاليًا is_4). يُستدعى مرة واحدة فقط
+   عند بناء اللقطة (أول سؤال بعد إبطال أو انتهاء TTL) — صفر قراءات قاعدة بيانات وقت الأسئلة.
+   يشمل كروت المحتوى العام فقط: لا درجات/حضور/مصروفات/مستندات (بيانات شخصية) ولا محتوى ملفات.
+   عقد الكمال (B3): فشل أي كارت أو تجاوز مهلة البناء الكلية 12 ثانية يعيد نصًا فاضيًا —
+   فلا تُنشر لقطة ناقصة ولا تمس لقطة صالحة سابقة. */
+const AI_SNAPSHOT_CARDS=[
+  ['lectures','lectures','المحاضرات',handleLectures],
+  ['sheets','sheets','شيتاتي',handleSheets],
+  ['exams','exams','الامتحانات',handleExams],
+  ['sections','sections','السكاشن',handleSections],
+  ['studyschedule','studySchedule','الجدول الدراسي',handleStudySchedule],
+  ['news','news','أخبار المعهد',handleNews],
+  ['military','military','الخدمة العسكرية',handleMilitary],
+]; // [مفتاح المسار، مفتاح الفلاج في readFlags (قد يكون camelCase)، الاسم، المعالج] — B8: مسار studyschedule فلاجه studySchedule
+const AI_SNAPSHOT_BUILD_DEADLINE_MS=12000; // مهلة البناء الكلية (B5): تُفرض قبل كل كارت وبعده وقبل النشر
+const AI_SNAPSHOT_CARD_ITEMS=15;
+const AI_SNAPSHOT_MAX_CHARS=5900; // أقل من حد الطبقة (6000) ليتسع وسم القص
+async function buildAISnapshotWorld(env,world,flags){
+  const started=Date.now();
+  const owner={sub:env.OWNER_UID};
+  const rpc=async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error('snapshot-backend');return r.data;};
+  const parts=[];
+  for(const [routeKey,flagKey,label,handler] of AI_SNAPSHOT_CARDS){
+    if(!flags||flags[flagKey]!=='supabase')continue;
+    const remain=AI_SNAPSHOT_BUILD_DEADLINE_MS-(Date.now()-started);
+    if(remain<=0)return ''; // مهلة كلية: لا نشر لناقص
+    let res;let timer;
+    try{
+      res=await Promise.race([
+        handler(new Request('https://snapshot.internal/v1/'+routeKey+'/list?world='+encodeURIComponent(world)),env,owner,{enabled:true,rpc}),
+        new Promise((_,bad)=>{timer=setTimeout(()=>bad(Error('snapshot-deadline')),remain);}),
+      ]);
+    }catch(_){return '';}
+    finally{clearTimeout(timer);} // B13: مسح المؤقت دائمًا؛ إلغاء RPC نفسه غير مدعوم في المعالجات الحالية (موثق)
+    if(Date.now()-started>AI_SNAPSHOT_BUILD_DEADLINE_MS)return ''; // فحص بعد المعالج
+    if(!res||res.status!==200)return '';
+    let j;try{j=await res.json();}catch(_){return '';}
+    // B12: بنية غير صالحة = فشل بناء، لا كارت فاضي
+    if(!j||typeof j!=='object'||!j.data||typeof j.data!=='object'||!Array.isArray(j.data.items))return '';
+    const items=j.data.items;
+    if(!items.length){parts.push('- '+label+': فاضي لسه.');continue;}
+    const shown=items.slice(0,AI_SNAPSHOT_CARD_ITEMS);
+    const lines=shown.map((it)=>{
+      const p=it&&typeof it==='object'&&it.payload&&typeof it.payload==='object'?it.payload:it;
+      const t=cleanSnapshotField(p.title||p.name||p.subject||p.kind||'');
+      const d=cleanSnapshotField(p.date||p.day||p.time||'',24);
+      return '  • '+(t||'(بلا عنوان)')+(d?' — '+d:'');
+    });
+    parts.push('- '+label+' ('+items.length+' إجماليًا'+(items.length>shown.length?'، المعروض أول '+shown.length+' فقط — القائمة غير مكتملة':'')+'):\n'+lines.join('\n'));
+  }
+  if(Date.now()-started>AI_SNAPSHOT_BUILD_DEADLINE_MS)return ''; // فحص أخير قبل النشر
+  let text=parts.join('\n');
+  if(text.length>AI_SNAPSHOT_MAX_CHARS)text=text.slice(0,AI_SNAPSHOT_MAX_CHARS)+'\n(اللقطة مقصوصة للاختصار — المحتوى غير مكتمل، راجع الكروت نفسها)';
+  return text;
+}
+export {buildAISnapshotWorld}; // لاختبارات الانحدار
+
+// إبطال لقطة بريق بعد أي تعديل ناجح على كارت عام (mutate) — بلا انتظار في مسار الرد
+function aiInvalidateOnMutate(request,env,ctx,url,response){
+  if(request.method!=='POST'||!/\/mutate$/.test(url.pathname)||!response||response.status>=300)return;
+  const p=invalidateAllAISnapshots(env).catch(()=>{});
+  if(ctx&&typeof ctx.waitUntil==='function')ctx.waitUntil(p);
+}
+
 export default {
   async scheduled(controller,env,ctx) {
     if(env.AUTHORITY_MODE!=='supabase')return;
@@ -1106,7 +1173,7 @@ export default {
       if(!r.ok)throw Error('authority-drain-backend');return r.data;
     }}));
   },
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     // 1) OPTIONS ← 204 للأصول المسموحة فقط
     if (request.method === "OPTIONS") {
@@ -1136,6 +1203,7 @@ export default {
       "GET /v1/news/list":1,"POST /v1/news/mutate":1,"GET /v1/news/badge":1,"POST /v1/news/read":1,"GET /v1/news/prefs":1,"POST /v1/news/prefs":1,"GET /v1/news/notifications":1,"POST /v1/news/notifications":1,
       "GET /v1/authority":1,"POST /v1/authority":1,
       "GET /v1/content/instructions/badge":1,"POST /v1/content/instructions/read":1,"POST /v1/admin/content/instructions": 1, "POST /v1/media/upload": 1, "GET /v1/config": 1, "GET /v1/content/instructions": 1,
+      "POST /v1/ai/chat": 1,
       "POST /v1/admin/sync/instructions": 1, "GET /v1/admin/reconcile/instructions": 1,
       "POST /v1/admin/reconcile/instructions/fix": 1, "GET /v1/admin/shadow/instructions": 1,
     };
@@ -1166,28 +1234,40 @@ export default {
     catch (_) { return err(request, env, 401, "invalid-token"); }
     if (!rateLimit("uid:" + user.sub, 120)) return err(request, env, 429, "rate-limited");
 
+    if(url.pathname==='/v1/ai/chat'){
+      const flags=await readFlags(env);
+      const response=await handleAI(request,env,user,{enabled:flags.ai==='gateway',rateLimit,buildSnapshot:(world)=>buildAISnapshotWorld(env,world,flags)});
+      const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
+    }
+
     if(url.pathname.startsWith('/v1/sheets/')){
       const response=await handleSheets(request,env,user,{enabled:(await readFlags(env)).sheets==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'sheets-backend');return r.data;}});
+      aiInvalidateOnMutate(request,env,ctx,url,response);
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
     if(url.pathname.startsWith('/v1/lectures/')){
       const response=await handleLectures(request,env,user,{enabled:(await readFlags(env)).lectures==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'lectures-backend');return r.data;}});
+      aiInvalidateOnMutate(request,env,ctx,url,response);
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
     if(url.pathname.startsWith('/v1/exams/')){
       const response=await handleExams(request,env,user,{enabled:(await readFlags(env)).exams==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'exams-backend');return r.data;}});
+      aiInvalidateOnMutate(request,env,ctx,url,response);
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
     if(url.pathname.startsWith('/v1/sections/')){
       const response=await handleSections(request,env,user,{enabled:(await readFlags(env)).sections==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'sections-backend');return r.data;}});
+      aiInvalidateOnMutate(request,env,ctx,url,response);
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
     if(url.pathname.startsWith('/v1/studyschedule/')){
       const response=await handleStudySchedule(request,env,user,{enabled:(await readFlags(env)).studySchedule==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'studyschedule-backend');return r.data;}});
+      aiInvalidateOnMutate(request,env,ctx,url,response);
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
     if(url.pathname.startsWith('/v1/military/')){
       const response=await handleMilitary(request,env,user,{enabled:(await readFlags(env)).military==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body,timeoutMs:8000});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'military-backend');return r.data;}});
+      aiInvalidateOnMutate(request,env,ctx,url,response);
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
     if(url.pathname.startsWith('/v1/tuition/')){
@@ -1204,6 +1284,7 @@ export default {
     }
     if(url.pathname.startsWith('/v1/news/')){
       const response=await handleNews(request,env,user,{enabled:(await readFlags(env)).news==='supabase',rpc:async(name,body)=>{const r=await sb(env,'/rpc/'+name,{method:'POST',body});if(!r.ok)throw Error(typeof r.data?.message==='string'?r.data.message:'news-backend');return r.data;}});
+      aiInvalidateOnMutate(request,env,ctx,url,response);
       const headers=new Headers(response.headers);for(const[k,v]of Object.entries(corsHeaders(request,env)))headers.set(k,v);return new Response(response.body,{status:response.status,headers});
     }
     if(cardRoute&&(await readFlags(env)).news==='supabase'&&cardRoute.card==='news')return err(request,env,410,'legacy-news-disabled');
