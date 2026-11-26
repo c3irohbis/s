@@ -121,6 +121,20 @@
 
   window.__forumGate = { touch: _touch };
 
+  /* ───────────── هل الكارت ده لسه بيستخدم مسار Firebase للشارات؟ ─────────────
+     لو كروت النطاق كلها اتنقلت للـ gateway (supabase) مفيش داعي لمستمع البوابة
+     أصلًا؛ ولو أي كارت رجع firebase (رولباك) المستمع بيتركب زي ما كان بالظبط. */
+  const _FLAG_BY_KEY = { news:"NEWS", lectures:"LECTURES", exams:"EXAMS", sections:"SECTIONS", studyschedule:"STUDYSCHEDULE", sheetaty:"SHEETS", military:"MILITARY", tuition:"TUITION" };
+  function _cardUsesFirebase(src) {
+    if (src.key === "instructions") return false;   // شارته من الـ gateway
+    const f = _FLAG_BY_KEY[src.key];
+    if (!f) return true;                            // lostfound: Firebase حاليًا
+    return window["__BLISS_" + f + "_MODE"] === "firebase";
+  }
+  function _scopeNeedsGate(scope) {
+    return SOURCES.some((src) => _scope(src) === scope && _cardUsesFirebase(src));
+  }
+
   /* ───────────── الشكل (badge على الكارت + badge على شريط "المنتدى") ───────────── */
   function _injectStyles() {
     if (document.getElementById("forumBadgeStyles")) return;
@@ -455,8 +469,8 @@
       _bindResetOnClick();
       _bindOnline();
       _loadState();
-      _watchGate("world");
-      _watchGate("global");
+      if (_scopeNeedsGate("world")) _watchGate("world");
+      if (_scopeNeedsGate("global")) _watchGate("global");
       void _pollInstructionsBadge();
       SOURCES.filter((s) => !_scope(s)).forEach(_watchGrades);
     }
