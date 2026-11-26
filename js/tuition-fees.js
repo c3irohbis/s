@@ -118,16 +118,19 @@
     const body = _body();
     if (body) body.innerHTML = `<div class="tf-loading"><div class="tf-spin"></div></div>`;
     try {
-      const { db, doc, onSnapshot } = await _fs();
-      _studentUnsub = onSnapshot(
-        doc(db, COL, worldId),
+      const sql = window.TuitionSQL;
+      if (!sql || !sql.enabled()) throw new Error("tuition-sql-unavailable");
+      const uid = window.currentUser?.uid;
+      _studentUnsub = sql.subscribe(
+        worldId, uid,
         (snap) => {
           // ✅ لو الشاشة اتغيرت (المستخدم رجع/أغلق) قبل ما يوصل أي تحديث لاحق، تجاهله
           if (_view !== "student-view") return;
           // ✅ نعرض أول snapshot يصل فورًا (من الكاش أو الخادم) — لا داعي لانتظار
           // تأكيد الخادم حصريًا (إعادة الاشتراك على نفس المستند قد لا يُسلّم حدثًا
           // تاليًا إن لم يتغيّر شيء، فينتج عنه تعليق أبدي على شاشة التحميل).
-          _renderStudentResult(snap.exists() ? snap.data() : null);
+          if (window.TuitionSQL && snap.viewToken) window.TuitionSQL.markViewed(worldId, uid);
+          _renderStudentResult(snap.docs[0] ? snap.docs[0].data() : null);
         },
         (err) => {
           if (_view !== "student-view") return;
@@ -198,8 +201,9 @@
     try {
       // ✅ المالك يرى كل الـ16 عالم دائمًا (isOwner() في الـRule يتجاوز شرط
       // تطابق worldId) — لا فلترة بـactiveWorldContext() هنا إطلاقًا.
-      const { db, collection, getDocs } = await _fs();
-      const snap = await getDocs(collection(db, COL));
+      const sql = window.TuitionSQL;
+      if (!sql || !sql.enabled()) throw new Error("tuition-sql-unavailable");
+      const snap = await sql.list(null, window.currentUser?.uid);
       _docs = {};
       snap.docs.forEach(d => { _docs[d.id] = d.data(); });
     } catch (e) { _docs = {}; }
@@ -352,18 +356,15 @@
     const btn = document.getElementById("tfSaveBtn");
     if (btn) btn.disabled = true;
     try {
-      const { db, doc, setDoc, serverTimestamp } = await _fs();
-      await setDoc(doc(db, COL, worldId), {
-        worldId,
-        year: _worldYear(worldId), // ✅ مُشتق تلقائيًا من worldId — ليس اختيارًا حرًا
-        cash, installments,
-        updatedAt: serverTimestamp(),
-        updatedBy: window.currentUser?.uid || ""
-      }, { merge: false });
+      const prev = _docs[worldId];
+      await window.TuitionSQL.save(worldId, {
+        year: _worldYear(worldId), // مُشتق من worldId
+        cash, installments
+      }, prev ? prev.__revision : null);
       window.toast?.("تم الحفظ بنجاح ✓");
       _ownerList();
     } catch (e) {
-      window.toast?.("فشل الحفظ — حاول مرة أخرى", "error");
+      window.toast?.(/conflict/.test(String(e?.code || e?.message)) ? "اتغيّرت البيانات — أعد فتح القائمة" : "فشل الحفظ — حاول مرة أخرى", "error");
       if (btn) btn.disabled = false;
     }
   };
@@ -373,9 +374,7 @@
   window.TuitionModule._delete = async function (worldId) {
     if (!_isOwner() || !worldId) return;
     try {
-      const { db, doc, getDoc, deleteDoc } = await _fs();
-      const ref = doc(db, COL, worldId);
-      const snap = await getDoc(ref);
+      const snap = { exists: () => !!_docs[worldId], data: () => _docs[worldId] };
       // ✅ نفس شرط الـRule بالضبط (isOwner() && 'worldId' in resource.data) —
       // بدون أي مقارنة بعالم نشط، لأن المالك يدير الـ16 عالم كلهم بالتساوي.
       if (!snap.exists() || !snap.data()?.worldId) {
@@ -383,7 +382,7 @@
         return;
       }
       if (!window.confirm(`حذف بيانات مصروفات ${_worldLabel(worldId)} نهائيًا؟`)) return;
-      await deleteDoc(ref);
+      await window.TuitionSQL.remove(worldId, _docs[worldId].__revision);
       window.toast?.("تم الحذف");
       _ownerList();
     } catch (e) { window.toast?.("فشل الحذف", "error"); }
