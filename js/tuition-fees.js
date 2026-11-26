@@ -35,8 +35,6 @@
   if (window.__tuitionModuleLoaded) return;
   window.__tuitionModuleLoaded = true;
 
-  const _FB  = "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  const COL  = "tuitionFees";
 
   // ✅ منطق مركزي وحيد لتحويل worldId إلى (قسم + فرقة) — لا مكان آخر
   // في الملف يجب أن يحسب هذا التحويل بشكل منفصل.
@@ -49,10 +47,6 @@
   function _worldYear(worldId) { const p = _worldParts(worldId); return p ? p.year : ""; }
   function _worldLabel(worldId) { const p = _worldParts(worldId); return p ? `${p.section} — ${p.year}` : (worldId || ""); }
 
-  async function _fs() {
-    if (!window.db) throw new Error("Firebase غير متاح");
-    return { db: window.db, ...(await import(_FB)) };
-  }
   function _esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
