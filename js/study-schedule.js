@@ -169,9 +169,10 @@
     try {
       const wid = (typeof window.activeWorldContext === "function") ? window.activeWorldContext() : null;
       if (!wid) return;
-      const { db, doc, getDoc } = await _fs();
-      const snap = await getDoc(doc(db, "attendanceSettings", wid));
-      _attLink = snap.exists() && snap.data().useStudySchedule === true;
+      const sql = window.AttendanceSQL;
+      if (!sql || !sql.enabled()) throw new Error("attendance-sql-unavailable");
+      const cfg = await sql.getConfig();
+      _attLink = !!cfg.settings && cfg.settings.useStudySchedule === true;
       _attLinkWid = wid;
     } catch (e) { _attLink = null; _attLinkWid = null; }
   }
@@ -196,8 +197,9 @@
     if (!wid || wid !== _attLinkWid) { window.toast?.("لا يوجد عالم نشط — تعذّر الحفظ", "error"); return; }
     const next = !_attLink;
     try {
-      const { db, doc, setDoc } = await _fs();
-      await setDoc(doc(db, "attendanceSettings", wid), { useStudySchedule: next }, { merge: true });
+      const sql = window.AttendanceSQL;
+      if (!sql || !sql.enabled()) throw new Error("attendance-sql-unavailable");
+      await sql.setSettings({ useStudySchedule: next });
       _attLink = next;
       window.__attSetLinked?.(next); // يحدّث قفل/ملاحظة جدول الحضور اليدوي فورًا
       window.toast?.(next ? "تم ربط الحضور والغياب بالجدول الدراسي" : "تم إيقاف الربط — عاد الحضور للجدول اليدوي");
