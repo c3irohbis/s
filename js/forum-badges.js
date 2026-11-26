@@ -79,6 +79,7 @@
       if (seg.length > 2) return;                       // مجموعات فرعية (تعليقات...) خارج العدّاد
       const src = BY_COL[seg[0]];
       if (!src) return;
+      if(src.key==='sheetaty'&&window.__BLISS_SHEETS_MODE!=='firebase')return;
       if(src.key==='news'&&window.__BLISS_NEWS_MODE!=='firebase')return;
       if (src.timeField === "createdAt") {
         // العدّاد بيحسب المستندات الجديدة: التعديل العادي ما يغيّرش النتيجة، إلا تغيّر الحالة (راحت فين؟)
@@ -229,6 +230,7 @@
 
   function _evaluate(src, stamp) {
     if(src.key === "instructions")return;
+    if(src.key==='sheetaty'&&window.__BLISS_SHEETS_MODE!=='firebase')return;
     if(src.key === "news"&&(window.__BLISS_NEWS_MODE!=='firebase'))return;
     _lastStamp[src.key] = stamp;
     if (_verified[src.key] === stamp) return;
@@ -315,6 +317,7 @@
 
   /* ───────────── فتح الكارت = تمّت القراءة ───────────── */
   async function _markRead(key) {
+    if(key==='sheetaty'&&window.__BLISS_SHEETS_MODE!=='firebase')return;
     const src = SOURCES.find((s) => s.key === key);
     if (!src || !_fs || !_uid) return;
     if(key === "news"&&(window.__BLISS_NEWS_MODE!=='firebase'))return;
@@ -381,6 +384,7 @@
     if(j.meta?.complete!==true||j.meta?.source!=='supabase'||!Number.isInteger(j.data?.count)||j.data.count<0)throw Error('instructions-badge-payload');
     _counts.instructions=j.data.count;_renderAll();return j.data.count;
   }
+  window.addEventListener('sheets-badge',e=>{if(e.detail?.uid!==_uid||e.detail?.world!==_worldId)return;_counts.sheetaty=e.detail.count;_renderAll();});
   window.addEventListener('news-badge',e=>{if(e.detail?.uid!==_uid||e.detail?.world!==_worldId)return;_counts.news=e.detail.count;_renderAll();});
   let _instructionsBadgeTimer=null;
   async function _pollInstructionsBadge(){

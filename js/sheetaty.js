@@ -34,7 +34,9 @@
   const COL_SUBJECTS = "subjects";
   const COL_SHEETS = "sheets";
 
+  const _sql=()=>window.__BLISS_SHEETS_MODE!=='firebase';
   async function _fs() {
+    if(_sql())throw Error('Sheets SQL adapter unavailable');
     if (!window.db) throw new Error("Firebase غير متاح");
     return { db: window.db, ...(await import(_FB)) };
   }
@@ -104,17 +106,26 @@
   ───────────────────────────────────────── */
   async function _load() {
     const body = _body();
-    if (body) body.innerHTML = `<div class="sht-loading"><div class="sht-spin"></div></div>`;
+    if (body&&!(_sql()&&_loaded)) body.innerHTML = `<div class="sht-loading"><div class="sht-spin"></div></div>`;
+    const uid=_uid(),wid0=_worldId(),generation=++_subjectGeneration;
     try {
+      if(_sql()){
+        if(!window.SheetsStore)throw Error('sheets-unavailable');const result=await SheetsStore.list(null);
+        if(uid!==_uid()||wid0!==_worldId()||generation!==_subjectGeneration)return;
+        _subjects=result.rows;_loaded=true;_loadedUid=uid;_renderHome();void SheetsStore.read(result.ticket).then(()=>window.SheetsBadge?.refresh()).catch(()=>{});return;
+      }
       const { db, collection, getDocs, query, where } = await _fs();
       const wid = _worldId();
       const snap = await getDocs(query(collection(db, COL_SUBJECTS), where("worldId", "==", wid)));
+      if(uid!==_uid()||wid0!==_worldId()||generation!==_subjectGeneration)return;
       _subjects = [];
       snap.forEach((d) => { const data = d.data(); if (wid && data.worldId === wid) _subjects.push({ id: d.id, ...data }); });
       _loaded = true;
       _loadedUid = _uid();
       _renderHome();
     } catch (e) {
+      if(uid!==_uid()||wid0!==_worldId()||generation!==_subjectGeneration)return;
+      if(_sql()&&_loaded){window.toast?.("تعذّر تحديث شيتاتي","error");return;}
       if (body) body.innerHTML = `<div class="sht-empty"><div class="sht-empty-title">تعذّر تحميل شيتاتي</div></div>`;
     }
   }
@@ -182,6 +193,14 @@
     if (body) body.innerHTML = `<div class="sht-loading"><div class="sht-spin"></div></div>`;
     try {
       if (!uid || !world || !subj || subj.worldId !== world) throw new Error("Invalid subject context");
+      if(_sql()){
+        const result=await SheetsStore.list(subjectId);if(!current())return;
+        if(result.subject){const n=_subjects.findIndex(x=>x.id===subjectId);if(n>=0)_subjects[n]=result.subject;}
+        _sheets=result.rows;_completions={};_knownCompletionIds.clear();_completionsUid=uid;
+        for(const sh of _sheets){_completions[sh.id]={completed:sh.completed,completedAt:sh.completed_at};_knownCompletionIds.add(sh.id)}
+        _bariqSheetSnapshot={uid,world,at:Date.now(),subject:subj.name,rows:_sheets.map(sh=>({subject:subj.name,page:String(sh.page||''),due:String(sh.dueDate||''),note:String(sh.note||''),done:!!sh.completed}))};
+        _renderSubject();return;
+      }
       const fns = await _fs();
       const {db,collection,getDocs,query,where,orderBy} = fns;
       const sheetsSnap = await getDocs(query(collection(db, COL_SHEETS), where("subjectId", "==", subjectId), where("worldId", "==", world), orderBy("order")));
@@ -277,13 +296,16 @@
   /* ─────────────────────────────────────────
      اتعمل / إلغاء اتعمل — شخصي لكل مستخدم
   ───────────────────────────────────────── */
+  const _completionBusy=new Set();
   window.SheetatyModule._toggleDone = async function (sheetId, subjectId) {
-    const uid = _uid();
-    if (!uid) return;
+    const uid = _uid(),world=_worldId(),generation=_subjectGeneration;
+    if (!uid||_completionBusy.has(sheetId)) return;
+    _completionBusy.add(sheetId);
     const wasDone = !!(_completions[sheetId] && _completions[sheetId].completed);
     _completions[sheetId] = { sheetId, subjectId, completed: !wasDone, completedAt: !wasDone ? new Date() : null };
     _renderSubject(); // optimistic
     try {
+      if(_sql()){await SheetsStore.complete(sheetId,!wasDone);if(uid===_uid()&&world===_worldId()&&generation===_subjectGeneration&&_bariqSheetSnapshot){const sh=_sheets.find(x=>x.id===sheetId),n=_sheets.indexOf(sh);if(n>=0&&_bariqSheetSnapshot.rows[n])_bariqSheetSnapshot.rows[n].done=!wasDone;}return;}
       const { db, doc, setDoc, serverTimestamp } = await _fs();
       await setDoc(doc(db, `users/${uid}/sheetCompletions`, sheetId), {
         sheetId, subjectId,
@@ -291,11 +313,11 @@
         completedAt: !wasDone ? serverTimestamp() : null,
       }, { merge: true });
     } catch (e) {
-      if (uid !== _uid()) return;
+      if (uid !== _uid()||world!==_worldId()||generation!==_subjectGeneration) return;
       // تراجع عند الفشل
       _completions[sheetId] = { sheetId, subjectId, completed: wasDone, completedAt: wasDone ? new Date() : null };
       _renderSubject();
-    }
+    }finally{_completionBusy.delete(sheetId);}
   };
 
   /* ─────────────────────────────────────────
@@ -331,7 +353,7 @@
         </div>
       </div>`;
   }
-  window.SheetatyModule._setSubjField = function (k, v) { if (_draftSubject) _draftSubject[k] = v; };
+  window.SheetatyModule._setSubjField = function (k, v) { if (_draftSubject) {if(_draftSubject[k]!==v)delete _draftSubject._request;_draftSubject[k] = v;} };
   window.SheetatyModule._cancelForm = function () {
     if (_currentSubjectId && _sheets) _renderSubject(); else _renderHome();
   };
@@ -342,6 +364,12 @@
     if (!name) return;
     _busy = true;
     try {
+      if(_sql()){
+        const draft=_draftSubject,uid=_uid(),world=_worldId();draft._id=draft._id||crypto.randomUUID();draft._request=draft._request||crypto.randomUUID();
+        const old=draft.id?_subjects.find(x=>x.id===draft.id):null;
+        await SheetsStore.mutate('subject',draft.id?'update':'create',draft.id||draft._id,{name,code},old?.revision,draft._request);
+        if(uid!==_uid()||world!==_worldId())return;await _load();if(draft.id)await SheetatyModule._openSubject(draft.id);return;
+      }
       const { db, doc, addDoc, updateDoc, collection, serverTimestamp } = await _fs();
       if (_draftSubject.id) {
         await updateDoc(doc(db, COL_SUBJECTS, _draftSubject.id), { name, code });
@@ -405,26 +433,37 @@
         </div>
       </div>`;
   }
-  window.SheetatyModule._setSheetField = function (k, v) { if (_draftSheet) _draftSheet[k] = v; };
+  window.SheetatyModule._setSheetField = function (k, v) { if (_draftSheet) {if(_draftSheet[k]!==v)delete _draftSheet._request;_draftSheet[k] = v;} };
   window.SheetatyModule._pickImage = function (file) {
     if (!file || !_draftSheet) return;
     const prog = document.getElementById("shtImgProgress");
     if (prog) prog.innerHTML = `<div class="sht-upload-pct">0%</div>`;
+    const draft=_draftSheet,uploadId=crypto.randomUUID();draft._uploadId=uploadId;draft._uploading=true;
     window.uploadToCloudinaryWithProgress(file, (p) => {
+      if(_draftSheet!==draft||draft._uploadId!==uploadId)return;
       if (prog && p.pct != null) prog.innerHTML = `<div class="sht-upload-pct">${p.pct}%</div>`;
     }).then((res) => {
-      _draftSheet.image = res.url;
+      if(_draftSheet!==draft||draft._uploadId!==uploadId)return;draft._uploading=false;delete draft._request;_draftSheet.image = res.url;
       if (prog) prog.innerHTML = `<div class="sht-upload-pct sht-done-pct"><i class="fa-solid fa-check"></i> تم رفع الصورة</div>`;
     }).catch(() => {
+      if(_draftSheet!==draft||draft._uploadId!==uploadId)return;draft._uploading=false;
       if (prog) prog.innerHTML = `<div class="sht-upload-pct sht-fail-pct">فشل رفع الصورة</div>`;
     });
   };
   window.SheetatyModule._saveSheet = async function () {
     if (_busy || !_draftSheet || !_currentSubjectId) return;
+    if(_draftSheet._uploading){window.toast?.("استنى رفع الصورة يخلص","error");return;}
     const page = (_draftSheet.page || "").trim();
     if (!page || !_draftSheet.dueDate) { window.toast?.("اكتب صفحة الكتاب وتاريخ التسليم", "error"); return; }
     _busy = true;
     try {
+      if(_sql()){
+        const draft=_draftSheet,subject=_currentSubjectId,uid=_uid(),world=_worldId();draft._id=draft._id||crypto.randomUUID();draft._request=draft._request||crypto.randomUUID();
+        const data={page,dueDate:new Date(draft.dueDate).toISOString(),note:draft.note||null,image:draft.image||null};if(!draft.id)data.subjectId=subject;
+        const old=draft.id?_sheets.find(x=>x.id===draft.id):null;
+        await SheetsStore.mutate('item',draft.id?'update':'create',draft.id||draft._id,data,old?.revision,draft._request);
+        if(uid!==_uid()||world!==_worldId())return;await _load();await SheetatyModule._openSubject(subject);return;
+      }
       const { db, doc, updateDoc, collection, runTransaction, serverTimestamp, increment } = await _fs();
       const dueDate = new Date(_draftSheet.dueDate);
       if (_draftSheet.id) {
@@ -461,6 +500,11 @@
   window.SheetatyModule._deleteSheet = async function (id) {
     if (!_isAdmin() || !_currentSubjectId) return;
     try {
+      if(_sql()){
+        const old=_sheets.find(x=>x.id===id),subject=_currentSubjectId,uid=_uid(),world=_worldId();if(!old)return;
+        old._deleteRequest=old._deleteRequest||crypto.randomUUID();await SheetsStore.mutate('item','delete',id,{},old.revision,old._deleteRequest);
+        if(uid!==_uid()||world!==_worldId())return;await _load();await SheetatyModule._openSubject(subject);return;
+      }
       const { db, doc, deleteDoc, updateDoc, increment } = await _fs();
       await deleteDoc(doc(db, COL_SHEETS, id));
       // activeSheetsCount فقط بينقص هنا — sheetsCount (عدّاد الترقيم) يفضل زي ما هو
@@ -507,6 +551,11 @@
       confirmLabel: "أرشفة المادة",
       onConfirm: async () => {
         try {
+          if(_sql()){
+            const old=_subjects.find(x=>x.id===id),uid=_uid(),world=_worldId();if(!old)return;
+            old._archiveRequest=old._archiveRequest||crypto.randomUUID();await SheetsStore.mutate('subject','archive',id,{},old.revision,old._archiveRequest);
+            if(uid!==_uid()||world!==_worldId())return;await _load();await SheetatyModule._openSubject(id);return;
+          }
           const { db, doc, updateDoc, serverTimestamp } = await _fs();
           await updateDoc(doc(db, COL_SUBJECTS, id), { status: "archived", archivedAt: serverTimestamp() });
           await _load();
@@ -524,6 +573,11 @@
       confirmLabel: "فتح المادة",
       onConfirm: async () => {
         try {
+          if(_sql()){
+            const old=_subjects.find(x=>x.id===id),uid=_uid(),world=_worldId();if(!old)return;
+            old._reopenRequest=old._reopenRequest||crypto.randomUUID();await SheetsStore.mutate('subject','reopen',id,{},old.revision,old._reopenRequest);
+            if(uid!==_uid()||world!==_worldId())return;await _load();await SheetatyModule._openSubject(id);return;
+          }
           const { db, doc, updateDoc } = await _fs();
           await updateDoc(doc(db, COL_SUBJECTS, id), { status: "active", archivedAt: null });
           await _load();
@@ -578,6 +632,9 @@
     _view = "home"; _tab = "active";
     _currentSubjectId = null; _draftSubject = null; _draftSheet = null;
   };
+  let _refreshBusy=false;window.addEventListener('sheets-changed',async()=>{if(_refreshBusy||_busy||!_root()?.classList.contains('sht-open')||!['home','subject'].includes(_view))return;_refreshBusy=true;const id=_currentSubjectId;try{if(_view==='subject'&&id)await SheetatyModule._openSubject(id);else await _load();}finally{_refreshBusy=false;}});
+  let _worldSignature=null;setInterval(()=>{const sig=_uid()+'|'+_worldId();if(_worldSignature!==null&&sig!==_worldSignature)window.SheetatyModule._resetState();_worldSignature=sig;},400);
+  window.addEventListener('sheets-authority-denied',e=>{if(e.detail?.uid===_uid()&&e.detail?.world===_worldId())window.SheetatyModule._resetState();});
   window._sheetatyGuardUser = function (uid) {
     if (_loadedUid && _loadedUid !== uid) window.SheetatyModule._resetState();
   };
