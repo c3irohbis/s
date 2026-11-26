@@ -2,14 +2,10 @@ import { getSchedule } from "./schedule-repository.js?v=2";
 /* ══════════════════════════════════════════════════════════════════
    js/attendance.js — نظام الحضور والغياب (ملف مستقل بالكامل)
    ══════════════════════════════════════════════════════════════════
-   موديل البيانات في Firestore:
-   - attendanceSettings/config
-       { enabled: boolean }
-   - attendanceSchedules/{day}   (day: sunday|monday|tuesday|wednesday
-                                        |thursday|friday|saturday)
-       { enabled: boolean, startTime:"HH:MM", endTime:"HH:MM",
-         subjects: [{ id, name, order }] }
-   - users/{uid}/attendance/{YYYY-MM-DD}
+   موديل البيانات (Supabase عبر AttendanceSQL — بلا أي قراءة أو كتابة Firestore):
+   - إعدادات النظام وجدول الأسبوع لكل عالم: settings { enabled, useStudySchedule }
+       و schedules { day: { enabled, startTime, endTime, subjects:[{id,name,order}] } }
+   - سجل كل طالب (صف لكل يوم، يقرأه ويكتبه صاحبه فقط):
        { status:"present"|"partial"|"absent",
          totalSubjects, presentSubjects, absentSubjects,
          subjects:[{name,status}], completedAt }
@@ -22,11 +18,6 @@ import { getSchedule } from "./schedule-repository.js?v=2";
      يوم معين مايأثرش على سجلات قديمة اتسجلت قبل كده.
    - الوقت بيتحسب بتوقيت القاهرة دايمًا (مش وقت جهاز المستخدم).
 ══════════════════════════════════════════════════════════════════ */
-
-import {
-  collection, doc, getDoc, getDocs,
-  writeBatch, setDoc, query, where, documentId, getCountFromServer
-} from "./firestore-safe.js";
 
 function _db() { return window.db; }
 function _sql() { const s = window.AttendanceSQL; if (!s || !s.enabled()) throw new Error("attendance-sql-unavailable"); return s; }
@@ -158,9 +149,7 @@ export async function checkAttendancePopup() {
     if (created) { const cd = _cairoDateOf(created); if (cd > from) from = cd; } // لا نسأل عن أيام قبل إنشاء الحساب
 
     const scheds = await _loadScheds(wid, cfgSnap.data().useStudySchedule === true, cfg.schedules);
-    const recSnap = await getDocs(query(collection(_db(), "users", uid, "attendance"), where(documentId(), ">=", from)));
-    const done = new Set();
-    recSnap.forEach(d => done.add(d.id));
+    const done = new Set(Object.keys(await _sql().listRecords(from, null)));
 
     const queue = [];
     for (let i = LOOKBACK_DAYS; i >= 0; i--) {
@@ -258,7 +247,7 @@ async function _saveRecord(status, subjects) {
   if (!uid || !_pendingDate) return;
   const present = subjects.filter(s => s.status === "present").length;
   try {
-    await setDoc(doc(_db(), "users", uid, "attendance", _pendingDate), {
+    await _sql().saveRecord(_pendingDate, {
       status,
       totalSubjects: subjects.length,
       presentSubjects: present,
@@ -319,12 +308,10 @@ async function _loadAttMonth() {
   if (grid) grid.innerHTML = `<div class="spinner"></div>`;
   try {
     const {start,end} = _attMonthBounds(year,month);
-    const snap = await getDocs(query(collection(_db(), "users", uid, "attendance"), where(documentId(), ">=", start), where(documentId(), "<", end)));
+    const recs = await _sql().listRecords(start, end);
     if (!current()) return;
-    _attRecordsCache = {};
-    snap.forEach(d => { _attRecordsCache[d.id] = d.data(); });
+    _attRecordsCache = recs;
     _renderAttCalendar();
-    if (snap.metadata?.fromCache && grid) grid.insertAdjacentHTML("afterbegin", `<div class="empty-state">عرض نسخة محفوظة بدون اتصال. قد لا تظهر كل سجلات الشهر حتى عودة الاتصال.</div>`);
   } catch(e) {
     if (current() && grid) grid.innerHTML = `<div class="empty-state">تعذّر تحميل الشهر، حاول مرة أخرى</div>`;
   }
@@ -339,14 +326,9 @@ export async function loadAttendanceHistory() {
   _attCalMonth = {year,month}; _attRecordsCache = {};
   const monthLoad = _loadAttMonth();
   try {
-    const ref = collection(_db(), "users", uid, "attendance");
-    const [present, absent, total] = await Promise.all([
-      getCountFromServer(query(ref, where("status", "in", ["present","partial"]))),
-      getCountFromServer(query(ref, where("status", "==", "absent"))),
-      getCountFromServer(ref)
-    ]);
+    const st = await _sql().recordStats();
     if (uid !== window.currentUser?.uid || generation !== _attHistoryGeneration) return;
-    const presentDays = present.data().count, absentDays = absent.data().count, totalDays = total.data().count;
+    const presentDays = st.present, absentDays = st.absent, totalDays = st.total;
     const pct = totalDays ? Math.round((presentDays / totalDays) * 100) : 0;
     statsEl.innerHTML = `
       <div class="att-stat-card"><div class="att-stat-num good">${presentDays}</div><div class="att-stat-label">أيام حضور</div></div>
