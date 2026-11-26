@@ -15,6 +15,7 @@ function entryFor(db, world, uid) {
 }
 const scheduleQuery = e => query(collection(e.db,'studySchedule'),where('worldId','==',e.world));
 export function subscribeSchedule(db, world, uid, next, error) {
+  if (window.__BLISS_STUDYSCHEDULE_MODE !== 'firebase') return window.StudyScheduleSQL.subscribe(world, uid, next, error);
   const e = entryFor(db,world,uid), listener = {next,error};
   e.listeners.add(listener);
   if (!e.stop) {
@@ -36,6 +37,7 @@ export function subscribeSchedule(db, world, uid, next, error) {
   };
 }
 export async function getSchedule(db, world, uid = globalThis.currentUser?.uid) {
+  if (window.__BLISS_STUDYSCHEDULE_MODE !== 'firebase') return window.StudyScheduleSQL.list(world, uid);
   const e = entryFor(db,world,uid);
   if (e.stop && e.snapshot) return e.snapshot;
   if (e.pending) return e.pending;
