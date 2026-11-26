@@ -1,0 +1,73 @@
+/* Bariq-only styles. Existing chat bubbles remain unchanged elsewhere. */
+#page-ai-chat .chat-main{height:100dvh;min-height:0;display:flex;flex-direction:column}
+#page-ai-chat .chat-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:12px 14px 24px;scroll-padding-top:14px}
+#page-ai-chat .chat-header{flex-shrink:0}
+#page-ai-chat .chat-input{flex-shrink:0;padding-bottom:max(10px,env(safe-area-inset-bottom))}
+#page-ai-chat .msg-row.other .msg-bubble-group{width:100%;max-width:100%}
+#page-ai-chat .msg-row.other .bubble{max-width:100%;width:100%;box-sizing:border-box}
+#page-ai-chat .bubble-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8;font-size:14px}
+#page-ai-chat .bubble-text:has(.bariq-topic-title){white-space:normal}
+.bariq-hero{display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 0 18px;direction:rtl}
+.bariq-hero img{object-fit:contain;flex-shrink:0}
+.bariq-hero strong{display:block;font-size:20px;color:#d8bf80}
+.bariq-hero span{display:block;font-size:12px;opacity:.7;margin-top:4px}
+.bariq-options{display:grid;grid-template-columns:1fr;gap:8px;margin-top:12px;white-space:normal}
+#page-ai-chat button.bariq-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:45px;padding:10px 12px;border:1px solid rgba(208,177,111,.28);border-radius:13px;background:rgba(208,177,111,.07);color:inherit;text-align:right;font:inherit;font-size:13px;line-height:1.5;cursor:pointer}
+.bariq-chip span{color:#d8bf80;font-size:20px}
+#page-ai-chat .bariq-topic-title{font-size:17px;line-height:1.6;margin:0 0 12px;color:#dfc58c}
+.bariq-section{margin:0 0 13px}
+.bariq-section h4{font-size:13px;color:#b7a179;margin:0 0 4px}
+.bariq-section p{white-space:pre-wrap;font-size:13px;line-height:1.95;margin:0}
+.bariq-follow-title{font-size:13px;font-weight:700;margin:14px 0 0}
+#page-ai-chat button.bariq-action{width:100%;margin-top:14px;padding:12px;border:1px solid #c5a565;border-radius:13px;background:#ccb176;color:#191713;font:inherit;font-size:13px;font-weight:700;line-height:1.5;cursor:pointer;min-height:46px}
+#page-ai-chat .bariq-action-note{white-space:normal;font-size:10px;line-height:1.7;opacity:.62;margin:6px 0 0}
+.bariq-topic-nav{display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid rgba(160,160,160,.15);margin-top:14px;padding-top:10px}
+#page-ai-chat .bariq-topic-nav button{background:transparent;border:0;padding:5px 0;color:#a8b8cf;font:inherit;font-size:11px;text-decoration:underline;cursor:pointer;min-height:36px}
+#page-ai-chat button:focus-visible{outline:2px solid #d8bf80;outline-offset:3px}
+#page-ai-chat .ai-avatar img{width:100%;height:100%;object-fit:contain}
+.theme-light #page-ai-chat .bariq-topic-title,.theme-light .bariq-hero strong{color:#75561d}
+.theme-light .bariq-section h4{color:#725e38}
+@media(min-width:700px){#page-ai-chat .chat-body{padding-left:24px;padding-right:24px}.bariq-options{grid-template-columns:1fr 1fr}}
+@media(prefers-reduced-motion:reduce){#page-ai-chat *{scroll-behavior:auto!important}}
+/* Compact FAQ density, matching the slim-row reference. */
+#page-ai-chat .bubble-text{font-size:12px;line-height:1.65}
+#page-ai-chat .msg-row.other .bubble{padding:10px 12px;border-radius:12px}
+.bariq-options{display:flex;flex-direction:column;gap:0;margin-top:8px;background:rgba(208,177,111,.035);border-radius:9px;overflow:hidden}
+#page-ai-chat button.bariq-chip{min-height:36px;padding:7px 9px;border:0;border-bottom:1px solid rgba(160,160,160,.17);border-radius:0;background:transparent;font-size:12px;line-height:1.55}
+#page-ai-chat button.bariq-chip:last-child{border-bottom:0}
+.bariq-chip span{font-size:16px}
+.bariq-hero{padding:3px 0 10px;gap:8px}
+.bariq-hero img{width:54px;height:54px}
+.bariq-hero strong{font-size:16px}
+.bariq-hero span{font-size:10px}
+#page-ai-chat .bariq-topic-title{font-size:14px;margin-bottom:8px}
+.bariq-section{margin-bottom:9px}
+.bariq-section h4{font-size:11px;margin-bottom:3px}
+.bariq-section p{font-size:12px;line-height:1.75}
+.bariq-follow-title{font-size:11px;margin-top:9px}
+#page-ai-chat button.bariq-action{min-height:36px;padding:8px;margin-top:10px;border-radius:9px;font-size:12px}
+#page-ai-chat .bariq-action-note{font-size:9px}
+.bariq-topic-nav{margin-top:9px;padding-top:5px}
+#page-ai-chat .bariq-topic-nav button{font-size:10px;min-height:30px}
+/* Native neutral chat treatment. */
+#page-ai-chat .bariq-topic-title,.bariq-hero strong,.bariq-section h4,.bariq-chip span{color:inherit}
+#page-ai-chat .bariq-section h4{opacity:.65;font-weight:500}
+.bariq-hero strong{font-weight:600}
+.bariq-options{background:transparent;border-radius:0}
+#page-ai-chat button.bariq-chip{border-bottom:1px solid rgba(145,145,145,.15);font-weight:400;background:transparent}
+#page-ai-chat .bariq-chip span{opacity:.4}
+#page-ai-chat button.bariq-action{background:rgba(145,145,145,.12);color:inherit;border:1px solid rgba(145,145,145,.25);font-weight:500;border-radius:8px;box-shadow:none}
+#page-ai-chat .bariq-topic-nav button{color:inherit;opacity:.65;text-decoration:none}
+#page-ai-chat .msg-row.other .bubble{border-color:rgba(145,145,145,.14);box-shadow:none}
+#page-ai-chat .bariq-topic-title{font-weight:600}
+#page-ai-chat .bariq-section p{font-weight:400}
+#page-ai-chat .bubble-text{font-weight:400}
+/* Same surface tokens as dmex-mute-options in dm-extras.js. */
+#page-ai-chat .msg-row.other .bubble,#page-ai-chat .bariq-options{background:rgba(20,20,22,0.10);backdrop-filter:blur(8px) saturate(140%);-webkit-backdrop-filter:blur(8px) saturate(140%);border:1px solid rgba(255,255,255,.06);border-radius:14px}
+#page-ai-chat .bariq-options{padding:3px 8px}
+#page-ai-chat button.bariq-chip{font-family:'Cairo',system-ui,sans-serif;color:var(--text,#f2f2f4)}
+
+#page-ai-chat .bariq-table-wrap{overflow-x:auto;margin-top:10px;max-width:100%}#page-ai-chat .bariq-table{border-collapse:collapse;font-size:11px;width:100%;min-width:230px}#page-ai-chat .bariq-table th,#page-ai-chat .bariq-table td{padding:7px 5px;border-bottom:1px solid rgba(128,128,128,.25);text-align:right;vertical-align:top;white-space:pre-wrap;word-break:break-word}#page-ai-chat .bariq-table th{font-weight:700}
+
+.bariq-local-mark{display:grid;place-items:center;width:42px;height:42px;border:1px solid rgba(128,128,128,.2);border-radius:50%;font-size:22px;font-weight:700}
+#page-ai-chat .bariq-table{min-width:420px}#page-ai-chat .bariq-table th:last-child,#page-ai-chat .bariq-table td:last-child{min-width:70px;word-break:normal}#page-ai-chat .bariq-table-wrap{direction:rtl}

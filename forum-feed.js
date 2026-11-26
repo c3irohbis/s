@@ -1,10 +1,10 @@
 /* split from js/app-main.js (block P_content_loaders_forum) — verbatim code; cross-module state writes go through __set_* helpers */
 import { collection, deleteDoc, doc, getDoc, limit, limitToLast, startAfter, endBefore, onSnapshot, orderBy, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { db } from "/s/release/c14790137e2f9dd55c78e12d8bf147321df39fe29d4d84dc752b1329510391e4/js/app/a-init-config.js";
-import { AUDIT_ACTIONS, writeAuditLog } from "/s/release/c14790137e2f9dd55c78e12d8bf147321df39fe29d4d84dc752b1329510391e4/js/app/c-upload-audit-stub.js";
-import { isAdmin, isOwner } from "/s/release/c14790137e2f9dd55c78e12d8bf147321df39fe29d4d84dc752b1329510391e4/js/app/d-state-roles-email.js";
-import { confirm } from "/s/release/c14790137e2f9dd55c78e12d8bf147321df39fe29d4d84dc752b1329510391e4/js/app/e-toast-confirm.js";
-import { esc } from "/s/release/c14790137e2f9dd55c78e12d8bf147321df39fe29d4d84dc752b1329510391e4/js/app/v-profile-cards-picctx.js";
+import { db } from "/s/release/517833f80d5bde4c5c527e898eec4ce8ecd4fbea5c6057aa0589df4d379ee1f4/js/app/a-init-config.js";
+import { AUDIT_ACTIONS, writeAuditLog } from "/s/release/517833f80d5bde4c5c527e898eec4ce8ecd4fbea5c6057aa0589df4d379ee1f4/js/app/c-upload-audit-stub.js";
+import { isAdmin, isOwner } from "/s/release/517833f80d5bde4c5c527e898eec4ce8ecd4fbea5c6057aa0589df4d379ee1f4/js/app/d-state-roles-email.js";
+import { confirm } from "/s/release/517833f80d5bde4c5c527e898eec4ce8ecd4fbea5c6057aa0589df4d379ee1f4/js/app/e-toast-confirm.js";
+import { esc } from "/s/release/517833f80d5bde4c5c527e898eec4ce8ecd4fbea5c6057aa0589df4d379ee1f4/js/app/v-profile-cards-picctx.js";
 /* ══════════════════════════════════════════
    CONTENT LOADERS
 ══════════════════════════════════════════ */

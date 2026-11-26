@@ -29,6 +29,8 @@ import {
 } from "./firestore-safe.js";
 
 function _db() { return window.db; }
+function _sql() { const s = window.AttendanceSQL; if (!s || !s.enabled()) throw new Error("attendance-sql-unavailable"); return s; }
+function _cfgSnap(cfg) { return { exists: () => !!cfg.settings, data: () => cfg.settings || {} }; }
 
 // ── World Isolation: activeWorldContext() هو المصدر الوحيد للعالم ──
 function _worldId() {
@@ -84,7 +86,7 @@ function _buildStudyDay(lectures) {
 }
 
 // جداول الأسبوع كله دفعة واحدة: { sunday: sched|null, ... } — استعلام واحد للجدول الدراسي أو 7 مستندات يدوية
-async function _loadScheds(wid, linked) {
+async function _loadScheds(wid, linked, manual) {
   const out = {};
   if (linked) {
     const snap = await getSchedule(_db(), wid);
@@ -92,10 +94,7 @@ async function _loadScheds(wid, linked) {
     snap.forEach(d => { const l = d.data(); if (l.worldId === wid) (byDay[l.day] = byDay[l.day] || []).push(l); }); // عزل العالم
     DAY_ORDER.forEach(wd => { out[wd] = _buildStudyDay(byDay[_WEEKDAY_TO_SS_KEY[wd]] || []); });
   } else {
-    await Promise.all(DAY_ORDER.map(async wd => {
-      const sn = await getDoc(doc(_db(), "attendanceSchedules", `${wid}_${wd}`));
-      out[wd] = sn.exists() ? sn.data() : null;
-    }));
+    DAY_ORDER.forEach(wd => { out[wd] = (manual && manual[wd]) || null; });
   }
   return out;
 }
@@ -148,7 +147,8 @@ export async function checkAttendancePopup() {
     const wid = _worldId();
     if (!wid) return; // ✅ World Isolation: بلا عالم صالح لا تُعرض أي بيانات حضور
 
-    const cfgSnap = await getDoc(doc(_db(), "attendanceSettings", wid));
+    const cfg = await _sql().getConfig();
+    const cfgSnap = _cfgSnap(cfg);
     if (!cfgSnap.exists() || cfgSnap.data().enabled !== true) { _queue = []; return; }
 
     const { dateStr, hhmm } = _cairoNow();
@@ -157,7 +157,7 @@ export async function checkAttendancePopup() {
     const created = window._currentUserData?.createdAt?.toDate?.();
     if (created) { const cd = _cairoDateOf(created); if (cd > from) from = cd; } // لا نسأل عن أيام قبل إنشاء الحساب
 
-    const scheds = await _loadScheds(wid, cfgSnap.data().useStudySchedule === true);
+    const scheds = await _loadScheds(wid, cfgSnap.data().useStudySchedule === true, cfg.schedules);
     const recSnap = await getDocs(query(collection(_db(), "users", uid, "attendance"), where(documentId(), ">=", from)));
     const done = new Set();
     recSnap.forEach(d => done.add(d.id));
@@ -449,13 +449,15 @@ async function _initPanel(panelIds) {
     return;
   }
   try {
-    const cfgSnap = await getDoc(doc(_db(), "attendanceSettings", wid));
+    const cfg = await _sql().getConfig();
+    const cfgSnap = _cfgSnap(cfg);
+    _weeklyCache = cfg.schedules;
     const enabled = cfgSnap.exists() ? !!cfgSnap.data().enabled : false;
     const sw = _el(panelIds.switchId);
     if (sw) sw.checked = enabled;
     _linkedToStudy = cfgSnap.exists() && cfgSnap.data().useStudySchedule === true;
-  } catch (e) {}
-  await _loadWeeklyCache(wid);
+  } catch (e) { _weeklyCache = {}; _linkedToStudy = false; }
+  if (!_weeklyCache || !Object.keys(_weeklyCache).length) await _loadWeeklyCache(wid);
   _renderWeeklySummary(panelIds.summaryId);
 }
 
@@ -463,13 +465,7 @@ export async function attOwnerInit() { await _initPanel(_OWNER_PANEL_IDS); }
 export async function attAdminInit() { await _initPanel(_ADMIN_PANEL_IDS); }
 
 async function _loadWeeklyCache(wid) {
-  const results = await Promise.all(DAY_ORDER.map(async (k) => {
-    try {
-      const snap = await getDoc(doc(_db(), "attendanceSchedules", `${wid}_${k}`));
-      return [k, snap.exists() ? snap.data() : null];
-    } catch (e) { return [k, null]; }
-  }));
-  _weeklyCache = Object.fromEntries(results);
+  try { _weeklyCache = (await _sql().getConfig()).schedules; } catch (e) { _weeklyCache = Object.fromEntries(DAY_ORDER.map(k => [k, null])); }
 }
 
 function _renderWeeklySummary(summaryId) {
@@ -510,7 +506,7 @@ async function _toggleSystem(switchId) {
   const wid = _worldId();
   if (!wid) { window.toast?.("لا يوجد عالم نشط — تعذّر الحفظ", "error"); sw.checked = !sw.checked; return; }
   try {
-    await setDoc(doc(_db(), "attendanceSettings", wid), { enabled: sw.checked }, { merge: true });
+    await _sql().setSettings({ enabled: sw.checked });
     window.toast?.(sw.checked ? "تم تفعيل نظام الحضور" : "تم إيقاف نظام الحضور");
   } catch (e) {
     console.error(e);
@@ -652,9 +648,7 @@ async function _deleteDays(dayKeys, title, msg) {
   const ok = await window._appConfirm(title, msg);
   if (!ok) return;
   try {
-    const batch = writeBatch(_db());
-    keys.forEach(k => batch.delete(doc(_db(), "attendanceSchedules", `${wid}_${k}`)));
-    await batch.commit();
+    await _sql().deleteDays(keys);
     window.toast?.("تم الحذف ✅");
     await _loadWeeklyCache(wid);
     _renderWeeklySummary(_panelIds.summaryId);
@@ -678,21 +672,17 @@ window.attScheduleSave = async () => {
   const btn = _el("attScheduleSaveBtn");
   if (btn) { btn.disabled = true; btn.textContent = "جاري الحفظ..."; }
   try {
-    const batch = writeBatch(_db());
+    const payload = {};
     days.forEach(k => {
       const names = _modalDayData[k].subjects.map(s => (s || "").trim()).filter(Boolean);
       const subjects = names.map((name, i) => ({ id: `subject_${i + 1}`, name, order: i + 1 }));
-      batch.set(doc(_db(), "attendanceSchedules", `${wid}_${k}`), {
-        worldId: wid, enabled: true, startTime: _modalDayData[k].time || "15:00", endTime: "23:59", subjects
-      }, { merge: true });
+      payload[k] = { enabled: true, startTime: _modalDayData[k].time || "15:00", endTime: "23:59", subjects };
     });
     // أي يوم كان مفعّل قبل كده وماعادش مختار دلوقتي — يتقفل بس (مش يتحذف)
     DAY_ORDER.forEach(k => {
-      if (!_modalSelectedDays.has(k) && _weeklyCache[k] && _weeklyCache[k].enabled) {
-        batch.set(doc(_db(), "attendanceSchedules", `${wid}_${k}`), { worldId: wid, enabled: false }, { merge: true });
-      }
+      if (!_modalSelectedDays.has(k) && _weeklyCache[k] && _weeklyCache[k].enabled) payload[k] = { enabled: false };
     });
-    await batch.commit();
+    await _sql().saveSchedules(payload);
     window.toast?.("تم حفظ جدول الحضور ✅");
     window.__attCloseScheduleModal();
     await _loadWeeklyCache(wid);
