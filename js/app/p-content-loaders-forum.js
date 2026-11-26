@@ -119,6 +119,7 @@ function _forumLiveCacheTrusted(m, count) {
 function _forumLiveStop(key) {
   if(key==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){window.NewsFeed?.stop();return;}
   if(key==='exams'&&(window.__BLISS_EXAMS_MODE!=='firebase')){window.ExamsFeed?.stop();return;}
+  if(key==='sections'&&(window.__BLISS_SECTIONS_MODE!=='firebase')){window.SectionsFeed?.stop();return;}
   const e = _forumLive[key];
   if (!e.active && !e.unsub) return;
   e.gen++;                                   // أي callback قديم يتجاهل نفسه
@@ -223,6 +224,7 @@ function _forumLiveSync() {
     const e = _forumLive[key];
     if(key==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){window.NewsFeed?.sync();return;}
     if(key==='exams'&&(window.__BLISS_EXAMS_MODE!=='firebase')){window.ExamsFeed?.sync();return;}
+    if(key==='sections'&&(window.__BLISS_SECTIONS_MODE!=='firebase')){window.SectionsFeed?.sync();return;}
     if (!(canRun && _forumLiveShown(e))) { _forumLiveStop(key); e.failedSig = null; return; }
     // D9=A (مراجعة المالك نقطة 1): الكارت المفتوح لا يُعاد جلبه أبدًا — لا هنا ولا عبر أي استدعاء متكرر
     // (IntersectionObserver/visibilitychange أثناء الفتح). الفتح/الرجوع الحقيقي يمر بـ _forumLiveStop

@@ -21,7 +21,7 @@ function makeAdder(btnId, getFields, colName, successMsg, reloadFn) {
     let saved = false;
     let _newId = null;
     try {
-      const _ref = colName==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')?await window.NewsFeed.add(fields,{world:_worldId}):colName==='lectures'&&(window.__BLISS_LECTURES_MODE!=='firebase')?await window.LecturesLib.add(fields,{world:_worldId}):colName==='exams'&&(window.__BLISS_EXAMS_MODE!=='firebase')?await window.ExamsFeed.add(fields,{world:_worldId}):await addDoc(collection(db, colName), { ...fields, worldId: _worldId, createdAt: serverTimestamp() });
+      const _ref = colName==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')?await window.NewsFeed.add(fields,{world:_worldId}):colName==='lectures'&&(window.__BLISS_LECTURES_MODE!=='firebase')?await window.LecturesLib.add(fields,{world:_worldId}):colName==='exams'&&(window.__BLISS_EXAMS_MODE!=='firebase')?await window.ExamsFeed.add(fields,{world:_worldId}):colName==='sections'&&(window.__BLISS_SECTIONS_MODE!=='firebase')?await window.SectionsFeed.add(fields,{world:_worldId}):await addDoc(collection(db, colName), { ...fields, worldId: _worldId, createdAt: serverTimestamp() });
       _newId = _ref && _ref.id;
       saved = true;
       if(colName==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){
@@ -39,6 +39,7 @@ function makeAdder(btnId, getFields, colName, successMsg, reloadFn) {
       if(colName==='news'&&(window.__BLISS_NEWS_MODE!=='firebase')){try{reloadFn();}catch{}return;}
       if(colName==='lectures'&&(window.__BLISS_LECTURES_MODE!=='firebase')){try{reloadFn();}catch{}return;}
       if(colName==='exams'&&(window.__BLISS_EXAMS_MODE!=='firebase'))return;
+      if(colName==='sections'&&(window.__BLISS_SECTIONS_MODE!=='firebase'))return;
       try { window.CardGateway?.syncAfterWrite(colName, _newId, _worldId); } catch(_) {} // مزامنة البوابة (كامنة) — لا تمنع الإضافة أبدًا
       try { reloadFn(); } catch(_) {}
       if(colName==='news'&&(window.__BLISS_NEWS_MODE!=='firebase'))return;
