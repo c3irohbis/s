@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "generation": "bb4b21dd74a9a104a63391fbe5ae831ef41eb678b29ffc72237ea40f3b7d2c8a",
+  "generation": "1e39e472f7dbb4de1f94be73abe860dac69d0b4d46fa08a99b1affebed10df5b",
   "resources": [
     {
       "url": "release/edc7a52ba35f88ef0cc2213cd7af817f03522bf56005cb3bf1cd4910c28abeda/ai/ai-assistant.css",
@@ -1493,23 +1493,23 @@
       "sha256": "f24cbffac15ef65870989caf929d237376816f7b0890653dcd0eafb5b6204ef2"
     },
     {
-      "url": "direct-entry-bridge.js?v=8e3cef7d34a6",
-      "size": 1317,
-      "sha256": "8e3cef7d34a682ddbd25aeb343170f07eaa0bf6f491baa5d2da2ec368ca8bef6"
+      "url": "direct-entry-bridge.js?v=de8b29206463",
+      "size": 3706,
+      "sha256": "de8b2920646355a48cd3d8a01539804cfb523e2a70d9c925956fe9110b5b2a95"
     }
   ],
   "source": {
     "schema": 1,
     "kind": "direct-network-entry",
     "parent": "edc7a52ba35f88ef0cc2213cd7af817f03522bf56005cb3bf1cd4910c28abeda",
-    "bridge": "8e3cef7d34a682ddbd25aeb343170f07eaa0bf6f491baa5d2da2ec368ca8bef6",
+    "bridge": "de8b2920646355a48cd3d8a01539804cfb523e2a70d9c925956fe9110b5b2a95",
     "forum": "f24cbffac15ef65870989caf929d237376816f7b0890653dcd0eafb5b6204ef2",
     "lazy": "985fcc885cfe893a9001e52e6864458a7f7fe4c40e83d5229ee4fc08b581f0b2",
     "library": "700c36dd5ec43ae6869a7e533993a31e7f8b0deb3d6563f934ec99772620a52c",
     "notification": "bf93064ad40ed069a74bc14b0f7b14e4ccc9148eb12a6895b8f2f47c35d9d90a",
     "worker": "cc24cca874b0becf5366ef7dd463ecdfc6af22ad344f36a896c1a1c12d13754c",
     "fcm": "68782cf1903788d4e9def68834eeca901e646f1287f79f4e49727f54488c2324",
-    "builder": "c46fb757621f837db87690453fb5e3151ffb01cc9a3e43a86756506fd1ec1128",
+    "builder": "63e31c84860b1b9a57e777c9bf1fe91a05164d656fe1fa714012a93f4fc39355",
     "strategy": "reuse-immutable-source-no-gate-v2"
   }
 }
