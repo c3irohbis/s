@@ -47,6 +47,7 @@
     _prefsInflight = null; _prefsInflightUid = null;
     if(payload&&(window.__BLISS_NEWS_MODE!=='firebase'))delete payload.news;
     if(payload&&(window.__BLISS_LECTURES_MODE!=='firebase'))delete payload.lectures;
+    if(payload&&(window.__BLISS_EXAMS_MODE!=='firebase'))delete payload.exams;
     if (payload&&Object.keys(payload).length) {
       (async () => {
         try {
@@ -97,6 +98,7 @@
     const gen = _prefsGen;
     const newsLoad=(window.__BLISS_NEWS_MODE!=='firebase')?NewsAPI.request('prefs').then(result=>{if(gen===_prefsGen&&window.currentUser?.uid===uid&&!_dirty.news&&!_writing.news)_prefs.news=result.enabled;}).catch(()=>{}):Promise.resolve();
     const lecturesLoad=(window.__BLISS_LECTURES_MODE!=='firebase')?LecturesAPI.request('prefs').then(result=>{if(gen===_prefsGen&&window.currentUser?.uid===uid&&!_dirty.lectures&&!_writing.lectures)_prefs.lectures=result.enabled;}).catch(()=>{}):Promise.resolve();
+    const examsLoad=(window.__BLISS_EXAMS_MODE!=='firebase')?ExamsAPI.request('prefs').then(result=>{if(gen===_prefsGen&&window.currentUser?.uid===uid&&!_dirty.exams&&!_writing.exams)_prefs.exams=result.enabled;}).catch(()=>{}):Promise.resolve();
     const p = (async () => {
       try {
         const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
@@ -106,7 +108,7 @@
         if (snap.exists()) {
           const d = snap.data();
           // مفتاح غيّره المستخدم (أو قيد الكتابة) ما بيتكتبش فوقه بقيمة السيرفر القديمة
-          NS_KEYS.forEach(k => { if(k==='news'&&(window.__BLISS_NEWS_MODE!=='firebase'))return; if(k==='lectures'&&(window.__BLISS_LECTURES_MODE!=='firebase'))return; if (typeof d[k] === "boolean" && !_dirty[k] && !_writing[k]) _prefs[k] = d[k]; });
+          NS_KEYS.forEach(k => { if(k==='news'&&(window.__BLISS_NEWS_MODE!=='firebase'))return; if(k==='lectures'&&(window.__BLISS_LECTURES_MODE!=='firebase'))return; if(k==='exams'&&(window.__BLISS_EXAMS_MODE!=='firebase'))return; if (typeof d[k] === "boolean" && !_dirty[k] && !_writing[k]) _prefs[k] = d[k]; });
         }
         // مدة الكاش تبدأ فقط بعد قراءة ناجحة من السيرفر (مش من الكاش المحلي) — مستند غير موجود = نجاح (الافتراضيات)
         if (snap.metadata && snap.metadata.fromCache === false) {
@@ -114,7 +116,7 @@
         }
       } catch(e) {}
       await newsLoad;
-      await lecturesLoad;
+      await lecturesLoad;await examsLoad;
     })();
     _prefsInflight = p; _prefsInflightUid = uid;
     try { await p; } finally {
@@ -140,6 +142,10 @@
     if((window.__BLISS_LECTURES_MODE!=='firebase')&&Object.hasOwn(payload,'lectures')){
       try{if(gen!==_prefsGen||window.currentUser?.uid!==uid)throw Error('lectures-account-changed');await LecturesAPI.request('prefs',{method:'POST',body:{enabled:payload.lectures}});saved.add('lectures');}catch{}
       delete payload.lectures;
+    }
+    if((window.__BLISS_EXAMS_MODE!=='firebase')&&Object.hasOwn(payload,'exams')){
+      try{if(gen!==_prefsGen||window.currentUser?.uid!==uid)throw Error('exams-account-changed');await ExamsAPI.request('prefs',{method:'POST',body:{enabled:payload.exams}});saved.add('exams');}catch{}
+      delete payload.exams;
     }
     if(Object.keys(payload).length){try{
       const {doc,setDoc}=await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");

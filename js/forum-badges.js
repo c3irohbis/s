@@ -82,6 +82,7 @@
       if(src.key==='sheetaty'&&window.__BLISS_SHEETS_MODE!=='firebase')return;
       if(src.key==='news'&&window.__BLISS_NEWS_MODE!=='firebase')return;
       if(src.key==='lectures'&&window.__BLISS_LECTURES_MODE!=='firebase')return;
+      if(src.key==='exams'&&window.__BLISS_EXAMS_MODE!=='firebase')return;
       if (src.timeField === "createdAt") {
         // العدّاد بيحسب المستندات الجديدة: التعديل العادي ما يغيّرش النتيجة، إلا تغيّر الحالة (راحت فين؟)
         const obj = (data && typeof data === "object") ? data : null;
@@ -234,6 +235,7 @@
     if(src.key==='sheetaty'&&window.__BLISS_SHEETS_MODE!=='firebase')return;
     if(src.key === "news"&&(window.__BLISS_NEWS_MODE!=='firebase'))return;
     if(src.key === "lectures"&&(window.__BLISS_LECTURES_MODE!=='firebase'))return;
+    if(src.key === "exams"&&(window.__BLISS_EXAMS_MODE!=='firebase'))return;
     _lastStamp[src.key] = stamp;
     if (_verified[src.key] === stamp) return;
     const st = _st[src.key];
@@ -324,6 +326,7 @@
     if (!src || !_fs || !_uid) return;
     if(key === "news"&&(window.__BLISS_NEWS_MODE!=='firebase'))return;
     if(key === "lectures"&&(window.__BLISS_LECTURES_MODE!=='firebase'))return;
+    if(key === "exams"&&(window.__BLISS_EXAMS_MODE!=='firebase'))return;
     if(key === "instructions"){try{await _instructionsBadge(true);}catch(_){}return;}
     // كارت مؤكَّد إنه نظيف (بدون شارة وبصمته متحقق منها) → مفيش حاجة تتسجّل ولا كتابة
     const hadBadge = (_counts[key] || 0) > 0;
@@ -390,6 +393,7 @@
   window.addEventListener('sheets-badge',e=>{if(e.detail?.uid!==_uid||e.detail?.world!==_worldId)return;_counts.sheetaty=e.detail.count;_renderAll();});
   window.addEventListener('news-badge',e=>{if(e.detail?.uid!==_uid||e.detail?.world!==_worldId)return;_counts.news=e.detail.count;_renderAll();});
   window.addEventListener('lectures-badge',e=>{if(e.detail?.uid!==_uid||e.detail?.world!==_worldId)return;_counts.lectures=e.detail.count;_renderAll();});
+  window.addEventListener('exams-badge',e=>{if(e.detail?.uid!==_uid||e.detail?.world!==_worldId)return;_counts.exams=e.detail.count;_renderAll();});
   let _instructionsBadgeTimer=null;
   async function _pollInstructionsBadge(){
     if(_instructionsBadgeTimer)clearTimeout(_instructionsBadgeTimer);
