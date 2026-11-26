@@ -13,6 +13,7 @@ import { getApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.
 import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   sendEmailVerification, sendPasswordResetEmail, signOut, GoogleAuthProvider, signInWithPopup,
+  signInWithRedirect, getRedirectResult,
   verifyPasswordResetCode, confirmPasswordReset, applyActionCode
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -34,7 +35,9 @@ let resetHold = (() => {
 
 /* يُستدعى من onAuthStateChanged: true = لا تفتح الموقع الآن */
 window._authHold = (user) =>
-  busy || resetHold;
+  busy || resetHold || !!readMarker() || sdkRedirectPending();
+  /* الماركر أو راية Firebase نفسها يمسكان الموقع لحد ما يكمل إكمال الـ redirect —
+     فلا يفتح مسار الجلسة العام التطبيق قبل انتهاء فحوص الإكمال */
 
 /* ── رسائل الأخطاء (نفس صياغة الموقع القديم + رسائل Google/التحقق) ── */
 const ERR = {
@@ -57,6 +60,57 @@ const CANCELLED = ["auth/popup-closed-by-user", "auth/cancelled-popup-request", 
 const errMsg = (e) => ERR[e && e.code] || (e && e.message) || "حدث خطأ، حاول مرة أخرى.";
 
 const SESSION_GONE = "انتهت الجلسة، سجّل الدخول من جديد.";
+
+/* ── دخول Google على الموبايل: redirect بدل الـ popup ──
+   الـ popup على الموبايل بيفتح تبويب منفصل؛ لو انقطع التواصل مع التبويب الأصلي
+   (متصفح تاني أو متصفح داخل تطبيق) بيفضل تبويب يتيم والتبويب الأصلي يبان كأنه سجّل خروج.
+   الـ redirect بيكمّل في نفس التبويب ويرجع للموقع مسجَّل الدخول مباشرة. ── */
+const REDIRECT_KEY = "bis_google_redirect_v1";
+const REDIRECT_TTL = 30 * 60 * 1000;   /* ماركر أقدم من 30 دقيقة يُعتبر منسيًا ويُحذف */
+/* الماركر في sessionStorage: الـ redirect تنقّل في نفس التبويب، وتخزين التبويب ينجو من
+   التنقل ويبقى معزولًا عن باقي التبويبات — لا يستهلكه ولا يحذفه تبويب آخر */
+function readMarker() {
+  let m = null;
+  try { m = JSON.parse(sessionStorage.getItem(REDIRECT_KEY) || "null"); }
+  catch (e) { clearMarker(); return null; }   /* JSON تالف يُحذف فورًا */
+  if (!m) return null;
+  const age = Date.now() - m.ts;
+  if (!Number.isFinite(m.ts) || age < 0 || age > REDIRECT_TTL
+      || (m.mode !== "login" && m.mode !== "register")) { clearMarker(); return null; }
+  return m;
+}
+function clearMarker() { try { sessionStorage.removeItem(REDIRECT_KEY); } catch (e) {} }
+/* علم الـ SDK نفسه: Firebase يكتب firebase:pendingRedirect:<apiKey>:<appName> في
+   sessionStorage قبل _openRedirect مباشرة. ظهوره = التنقّل وشيك الحدوث.
+   المفتاح مخصَّص لتطبيق Firebase الحالي بالضبط (apiKey + appName) — لا نقرأ ولا
+   نمسح أعلام تطبيقات أخرى قد تشارك نفس النطاق */
+function sdkPendingKey() {
+  try {
+    const a = auth();
+    return "firebase:pendingRedirect:" + a.app.options.apiKey + ":" + a.app.name;
+  } catch (e) { return null; }
+}
+function sdkRedirectPending() {
+  const k = sdkPendingKey();
+  if (!k) return false;
+  try { return sessionStorage.getItem(k) === "true"; } catch (e) { return false; }
+}
+/* عند التخلي عن المحاولة بالكامل (مهلة الاسترداد أو إكمال فاشل): نزيل راية الـ SDK
+   الخاصة بتطبيقنا حتى لا تبقي _authHold الموقع محجوزًا — المحاولة تُعتبر ملغاة */
+function clearSdkRedirectPending() {
+  const k = sdkPendingKey();
+  if (!k) return;
+  try { sessionStorage.removeItem(k); } catch (e) {}
+}
+/* آيباد بوضع سطح المكتب يعرّف نفسه كـ Macintosh لكنه شاشة لمس → يُعامل كموبايل */
+const isMobileLike = () => /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent || "")
+  || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent || ""));
+/* اختيار المسار: override يدوي للدعم والاختبار (localStorage bis_auth_flow = redirect|popup)،
+   وإلا موبايل → redirect وكمبيوتر → popup */
+function googleFlow() {
+  try { const f = localStorage.getItem("bis_auth_flow"); if (f === "redirect" || f === "popup") return f; } catch (e) {}
+  return isMobileLike() ? "redirect" : "popup";
+}
 
 /* ── تحويل بيانات الواجهة {name, gender, dept, year} إلى بيانات الموقع {name, gender, worldId} ── */
 function toSite(p) {
@@ -127,6 +181,65 @@ B.loginEmail = async function ({ email, password }) {
 };
 
 B.google = async function (draft) {
+  /* موبايل: redirect في نفس التبويب. الماركر يتخزن قبل التنقل ويكمّل الدخول بعد الرجوع */
+  if (googleFlow() === "redirect") {
+    busy = true;
+    try {
+      sessionStorage.setItem(REDIRECT_KEY, JSON.stringify({ mode: draft ? "register" : "login", draft: draft || null, ts: Date.now() }));
+      /* التنقّل يُبدأ ويُراقَب بمؤقّت مستقل تمامًا عن وعد signInWithRedirect:
+         في Firebase 10.12.0 الوعد لا يُحسم أبدًا (_openRedirect ينقل الصفحة ثم يرجع
+         promise بلا حسم)، سواء حدث التنقّل أم لا — فانتظاره لا يكشف فشل التنقّل أبدًا.
+         pagehide يؤكد بدء التنقّل فيُحفَظ الماركر؛ غيابه مع انتهاء المهلة يعني بيئة
+         لم تتنقّل → فشل محدود نظيف بدل تعليق دائم بالحجز */
+      let navStarted = false, invokeError = null;
+      const onHide = function () { navStarted = true; };
+      window.addEventListener("pagehide", onHide, { once: true });
+      try { signInWithRedirect(auth(), new GoogleAuthProvider()).catch(function (e) { invokeError = e; }); }
+      catch (e) { invokeError = e; }   /* رفض متزامن عند الاستدعاء نفسه */
+      /* المرحلة 1: المسار الطبيعي — التنقّل يبدأ خلال ثوانٍ من الاستدعاء */
+      await new Promise(function (res) { setTimeout(res, 3000); });
+      /* المرحلة 2: تهيئة Firebase البطيئة قد تؤخر التنقّل بعد مهلة المرحلة 1.
+         علم pendingRedirect الذي يكتبه الـ SDK قبل _openRedirect يفرّق بين
+         «لم يبدأ التنقّل بعد» (ننتظر ولا نحذف الماركر) و«فشل فتح الصفحة» (فشل محدود) */
+      const deadline = Date.now() + 7000;
+      while (!navStarted && !invokeError && !sdkRedirectPending() && Date.now() < deadline)
+        await new Promise(function (res) { setTimeout(res, 250); });
+      /* العلم ظهر: التنقّل وشيك — مهلة أخيرة قصيرة لالتقاط pagehide */
+      while (!navStarted && !invokeError && sdkRedirectPending() && Date.now() < deadline + 3000)
+        await new Promise(function (res) { setTimeout(res, 250); });
+      window.removeEventListener("pagehide", onHide);
+      if (invokeError) throw invokeError;   /* مثل auth/unauthorized-domain قبل أي تنقّل */
+      if (navStarted) { busy = false; return { status: "cancelled" }; }   /* التنقّل بدأ: الماركر محفوظ والسياق سيُدمَّر */
+      /* حارس التنقّل المتأخر: تهيئة Firebase قد تتجاوز مهلة المراقبة ثم يبدأ التنقّل —
+         عندها يُعاد/يُحفَظ الماركر قبل مغادرة الصفحة فيكمل الرجوع بالمسار الكامل */
+      const markerData = { mode: draft ? "register" : "login", draft: draft || null };
+      let lateNav = false;
+      const onLateHide = function () {
+        lateNav = true;
+        try { sessionStorage.setItem(REDIRECT_KEY, JSON.stringify({ mode: markerData.mode, draft: markerData.draft, ts: Date.now() })); } catch (e) {}
+      };
+      window.addEventListener("pagehide", onLateHide, { once: true });
+      if (sdkRedirectPending()) {
+        /* علم الـ SDK ظهر دون pagehide: تنقّل محتمل ما زال متأخرًا — مهلة استرداد
+           20 ثانية ثم تحرير صريح (حذف الماركر + إعادة تقييم) حتى لا يبقى الموقع محجوزًا */
+        busy = false;
+        setTimeout(function () {
+          if (lateNav) return;   /* التنقّل بدأ أخيرًا: الماركر محفوظ */
+          window.removeEventListener("pagehide", onLateHide);
+          clearMarker(); clearSdkRedirectPending();   /* تخلٍّ كامل: لا ماركر ولا راية SDK تبقي الحجز */
+          if (typeof window._runAuthState === "function") window._runAuthState();
+        }, 20000);
+        return { status: "cancelled" };
+      }
+      /* لا تنقّل ولا علم بعد ~10 ثوانٍ: فشل محدود نظيف — وحارس التنقّل المتأخر يُنزع بعد دقيقة */
+      clearMarker(); busy = false;
+      setTimeout(function () { if (!lateNav) window.removeEventListener("pagehide", onLateHide); }, 60000);
+      return { status: "error", message: "تعذّر فتح صفحة Google، حاول مرة أخرى." };
+    } catch (e) {
+      clearMarker(); busy = false;
+      return { status: "error", message: errMsg(e) };
+    }
+  }
   busy = true;
   try {
     const cred = await signInWithPopup(auth(), new GoogleAuthProvider());
@@ -248,3 +361,61 @@ B.needsProfile = function (user) {
 
 /* الواجهة تنتظر هذا الإشعار قبل أول استدعاء (حتى لو ضغط المستخدم بسرعة) */
 if (typeof window.__resolveAuthBridge === "function") window.__resolveAuthBridge();
+
+/* ── إكمال دخول Google بعد الرجوع من redirect ──
+   ينفّذ نفس خطوات B.google بعد نجاح الدخول: حارس «الحساب مسجّل بالفعل» عند الإنشاء،
+   فحص الحظر وإنشاء ملف البيانات عبر afterSignIn، ثم فتح الموقع. */
+(async function completeGoogleRedirect() {
+  const marker = readMarker();
+  /* الإكمال لا يعتمد على ماركرنا وحده: لو ضاع (تهيئة تجاوزت كل نوافذ المراقبة أو
+     تنقّل متأخر جدًا) تشير راية Firebase نفسها (pendingRedirect) إلى رجوع redirect
+     حقيقي، فيسترجع getRedirectResult النتيجة وتُستعاد مسودة التسجيل من تخزين الواجهة */
+  if (!marker && !sdkRedirectPending()) return;
+  /* حجز صريح طوال الإكمال: لا يفتح مراقب حالة الدخول التطبيق قبل انتهاء
+     getRedirectResult وفحوص الملف، ويُحرَّر في كل مسارات الخروج.
+     بلا مهلة وبلا إجهاض عامد: الإكمال ينتظر الـ SDK مهما طال الوقت — فالإكمال
+     البطيء ينجح في النهاية بدل أن يُلغى، وأسوأ حالة عند تعليق الشبكة تمامًا هي
+     مؤشّر انتظار يبقى حتى إعادة تحميل الصفحة، دون أي حالة دخول غير صحيحة أبدًا */
+  busy = true;
+  let result = null, resultError = null;
+  try { result = await getRedirectResult(auth()); } catch (e) { resultError = e; }
+  const user = (result && result.user) || auth().currentUser || null;
+  if (!user) {
+    /* إلغاء أو فشل كامل: تحرير الماركر وراية الـ SDK + إعادة تقييم حالة الدخول صراحة — لا يبقى حجز معلّق */
+    clearMarker(); busy = false; clearSdkRedirectPending();
+    if (resultError && window.AuthUI && window.AuthUI.googleFail) window.AuthUI.googleFail(errMsg(resultError));
+    if (typeof window._runAuthState === "function") window._runAuthState();
+    return;
+  }
+  try {
+    /* وضع التسجيل ومسودته: من الماركر إن وُجد، وإلا تُستعاد مسودة الواجهة المحفوظة */
+    const uiDraft = (window.AuthUI && window.AuthUI.getDraft) ? (window.AuthUI.getDraft() || null) : null;
+    const isRegister = marker ? (marker.mode === "register") : !!uiDraft;
+    const draft = (!resultError && isRegister) ? ((marker && marker.draft) || uiDraft || null) : null;
+    if (draft) {
+      const existing = await userDoc(user.uid);
+      if (existing) {
+        await signOut(auth());
+        clearMarker(); busy = false;
+        if (window.AuthUI && window.AuthUI.googleExists) window.AuthUI.googleExists();
+        return;
+      }
+    }
+    /* مستخدم موجود رغم الخطأ (أو بعد إلغاء بجلسة سابقة): يدخل بنفس فحوص afterSignIn قبل فتح الموقع */
+    const r = await afterSignIn(user, draft);
+    clearMarker();
+    if (r.status === "ok") {
+      if (window.AuthUI && window.AuthUI.clearDraft) window.AuthUI.clearDraft();
+      B.onDone();
+    } else if (r.status === "incomplete") {
+      busy = true;   /* يمسك الموقع لحد إكمال البيانات (نفس مسار الـ popup) */
+      if (window.AuthUI && window.AuthUI.complete) window.AuthUI.complete(r.profile);
+    } else {
+      busy = false;
+      if (window.AuthUI && window.AuthUI.googleFail) window.AuthUI.googleFail(r.message || (resultError && errMsg(resultError)));
+    }
+  } catch (e) {
+    clearMarker(); busy = false; clearSdkRedirectPending();
+    if (window.AuthUI && window.AuthUI.googleFail) window.AuthUI.googleFail(errMsg(e));
+  }
+})();
