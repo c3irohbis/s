@@ -210,7 +210,14 @@ function _libBuildItemCard(d) {
     btn.querySelector("i").className = `fa-${isnow ? "solid" : "regular"} fa-bookmark`;
   });
 
-  div.querySelector(".lib-item-del-btn")?.addEventListener("click", () => {
+  div.querySelector(".lib-item-del-btn")?.addEventListener("click", async () => {
+    if (window.LecturesAPI && window.LecturesAPI.enabled && window.LecturesAPI.enabled()) {
+      const ok = window._appConfirm ? await window._appConfirm("تأكيد الحذف", "هل أنت متأكد من حذف هذا العنصر؟ لا يمكن التراجع.") : window.confirm("تأكيد الحذف؟");
+      if (!ok) return;
+      try { await window.LecturesLib.remove(d._id, d._rev, d.title || d.subject); window.toast?.("تم الحذف"); }
+      catch (e) { window.toast?.("فشل الحذف", "error"); }
+      return;
+    }
     window.deleteItem("lectures", d._id, null);
     div.style.opacity = "0.4";
     setTimeout(() => { div.remove(); _libReload(); }, 600);
@@ -333,6 +340,51 @@ function _libReload() {
   loadLectures();
 }
 
+
+/* ── Authoritative SQL mode (LecturesAPI) — no Firestore reads, no fallback ── */
+let _libSqlCtx=null,_libSqlUnsub=null,_libSqlGen=0,_libSqlBusy=false;
+let _libSqlDirty=false;let _libSqlCursor=null,_libSqlNextCursor=null,_libSqlPrevCursor=null,_libSqlHasMore=false,_libSqlHasPrevious=false,_libSqlMutation=null;
+function _libSqlStop(){_libSqlGen++;if(_libSqlUnsub){try{_libSqlUnsub()}catch(e){}}_libSqlUnsub=null;_libSqlCtx=null;_libSqlCursor=null;_libSqlNextCursor=null;_libSqlPrevCursor=null;_libSqlHasMore=false;_libSqlHasPrevious=false;_libSqlBusy=false;}
+async function _libSqlLoad(ctx,g,cursor){
+ if(_libSqlBusy)return;_libSqlBusy=true;let retryFirst=false;const grid=document.getElementById("libSubjectGrid");
+ if(!_libRendered&&grid)grid.innerHTML=_LIB_SPINNER_HTML;
+ try{
+  const data=await LecturesAPI.request('list',{world:ctx.world,cursor:cursor});
+  if(g!==_libSqlGen||window.currentUser?.uid!==ctx.uid||window._forumLiveCtx?.()?.sig!==ctx.sig)return;
+  _libAllDocs=data.items.map(row=>({_id:row.id,...row.payload,worldId:row.world_id,createdAt:new Date(row.created_at),_rev:row.revision}));
+  _libSqlCursor=cursor;_libSqlNextCursor=data.nextCursor||null;_libSqlPrevCursor=data.prevCursor||null;_libSqlHasMore=!!data.hasMore;_libSqlHasPrevious=!!data.hasPrevious;
+  _libDataSig=ctx.sig;_libLoadingMore=false;_libApplyData();_libRendered=true;
+  if(!cursor){try{await LecturesAPI.request('read',{method:'POST',body:{world:ctx.world,viewToken:data.viewToken}});if(g===_libSqlGen)window.dispatchEvent(new Event('lectures-read'));}catch(e){}}
+ }catch(e){
+  if(g!==_libSqlGen)return;
+  if(e&&(e.status===401||e.status===403)){_libAllDocs=[];_libDataSig=null;_libRendered=false;_libSqlStop();if(grid)grid.innerHTML="";window._forumLiveFailed?.("lectures",ctx.sig);}
+  else if(e&&e.status===409&&cursor){_libSqlCursor=null;retryFirst=true;}
+  else if(grid&&!_libRendered)grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1">تعذر تحميل المحاضرات. أعد فتح الكارت للمحاولة.</div>`;
+ }finally{if(g===_libSqlGen){_libSqlBusy=false;if(_libSqlCtx&&(retryFirst||_libSqlDirty)){_libSqlDirty=false;void _libSqlLoad(_libSqlCtx,_libSqlGen,retryFirst?null:_libSqlCursor);}}}
+}
+function _libSqlStart(ctx,paging){
+ const keepSub=!!(_libSqlUnsub&&_libSqlCtx&&_libSqlCtx.sig===ctx.sig);
+ _libSqlCtx=ctx;const g=++_libSqlGen;_libSqlBusy=false;_libSqlDirty=false;
+ if(!ctx.world){if(_libSqlUnsub){try{_libSqlUnsub()}catch(e){}}_libSqlUnsub=null;_libSqlCursor=null;_libAllDocs=[];_libDataSig=ctx.sig;_libApplyData();_libRendered=true;return;}
+ if(!paging){_libSqlCursor=null;_libRendered=false;}
+ if(!keepSub){if(_libSqlUnsub){try{_libSqlUnsub()}catch(e){}}_libSqlUnsub=LecturesAPI.subscribe(()=>{const c=_libSqlCtx;if(!c)return;if(_libSqlBusy)_libSqlDirty=true;else void _libSqlLoad(c,_libSqlGen,_libSqlCursor);});}
+ void _libSqlLoad(ctx,g,_libSqlCursor);
+}
+window.LecturesLib={
+ add:async(fields,{world}={})=>{
+  const c={uid:window.currentUser?.uid,world:world||window.activeWorldContext?.()};if(!c.uid||!c.world)throw Error('lectures-context');
+  const sig=JSON.stringify({uid:c.uid,world:c.world,fields});if(!_libSqlMutation||_libSqlMutation.sig!==sig)_libSqlMutation={sig,id:crypto.randomUUID(),requestId:crypto.randomUUID()};
+  const result=await LecturesAPI.request('mutate',{method:'POST',body:{world:c.world,action:'create',data:fields,id:_libSqlMutation.id,requestId:_libSqlMutation.requestId}});_libSqlMutation=null;
+  if(_libSqlCtx)void _libSqlLoad(_libSqlCtx,_libSqlGen,_libSqlCursor);return result;
+ },
+ remove:async(id,rev,title)=>{
+  const world=window.activeWorldContext?.();if(!world)throw Error('lectures-context');
+  await LecturesAPI.request('mutate',{method:'POST',body:{world,action:'delete',id,expectedRevision:rev,requestId:crypto.randomUUID()}});
+  try{window.writeAuditLog?.(window.AUDIT_ACTIONS?.DELETE_LECTURE||'delete_lecture',{collection:'lectures',docId:id,title:title||'—'});}catch(e){}
+  if(_libSqlCtx)void _libSqlLoad(_libSqlCtx,_libSqlGen,_libSqlCursor);
+ }
+};
+
 /* ══════════════════════════════════════════
    LIVE (onSnapshot) — بيتحكّم فيه index.html (_forumLiveSync) عبر _libLiveStart / _libLiveStop:
    مستمع واحد للقسم الظاهر بس، بيتفصل لما القسم يتخفّى أو يتغيّر الحساب/العالم أو التطبيق يتخفّى.
@@ -406,6 +458,12 @@ function _libRenderLoadMore() {
  document.getElementById("libPageNav")?.remove();
  const nav=document.createElement("div");nav.id="libPageNav";nav.style.cssText="grid-column:1/-1;text-align:center;padding:12px";
  const label=document.createElement("p");label.textContent="الصفحة الحالية فقط (حتى 60 محاضرة). البحث والمفضلة وعدّ المواد ضمن هذه الصفحة.";nav.appendChild(label);
+ if(window.LecturesAPI&&window.LecturesAPI.enabled&&window.LecturesAPI.enabled()){
+  for(const[text,cursor]of[["التالي",_libSqlHasMore?_libSqlNextCursor:null],["السابق",_libSqlHasPrevious?_libSqlPrevCursor:null],["الأحدث",_libSqlCursor?"latest":null]]){
+   const button=document.createElement("button");button.type="button";button.textContent=text;button.disabled=!cursor&&cursor!=="latest";
+   button.addEventListener("click",()=>{const ctx=_libSqlCtx;if(!ctx)return;_libSqlCursor=cursor==="latest"?null:cursor;void _libSqlLoad(ctx,_libSqlGen,_libSqlCursor);});nav.appendChild(button);
+  }grid.appendChild(nav);return;
+ }
  for(const [text,enabled,direction,cursor] of [["التالي",_libMayHaveMore&&!!_libLast,"next",_libLast],["السابق",_libHasPrevious&&!!_libFirst,"prev",_libFirst],["الأحدث",_libHasPrevious,null,null]]){
  const button=document.createElement("button");button.type="button";button.textContent=text;button.disabled=!enabled||_libLoadingMore;
  button.addEventListener("click",()=>{if(!_libLiveCtx||_libLoadingMore)return;const ctx=_libLiveCtx;_libLiveStop();_libDirection=direction;_libCursor=cursor;_libHasPrevious=!!direction;_libLoadingMore=true;_libLiveStart(ctx,true);});nav.appendChild(button);
@@ -413,6 +471,7 @@ function _libRenderLoadMore() {
 }
 
 function _libLiveStop() {
+  _libSqlStop();
   if (!_libLiveUnsub && !_libLiveCtx) return;
   _libLiveGen++;                                    // أي callback قديم يتجاهل نفسه
   if (_libLiveUnsub) { try { _libLiveUnsub(); } catch(e) {} }
@@ -421,6 +480,7 @@ function _libLiveStop() {
 }
 
 function _libLiveStart(ctx, paging = false) {
+  if (window.LecturesAPI && window.LecturesAPI.enabled && window.LecturesAPI.enabled()) { _libSqlStart(ctx, paging); return; }
   if (_libLiveUnsub && _libLiveCtx && _libLiveCtx.sig === ctx.sig) return;   // مستمع واحد لنفس الحساب/العالم
   _libLiveStop();
   if (!paging) { _libDirection=null; _libCursor=null; _libHasPrevious=false; }
