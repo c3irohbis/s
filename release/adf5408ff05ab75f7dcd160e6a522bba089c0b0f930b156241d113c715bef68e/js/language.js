@@ -1,0 +1,181 @@
+/* ══════════════════════════════════════════
+   طبقة تبديل اللغة (Default / Egyptian / English)
+   إضافية بالكامل — لا تعدّل ولا تحذف ولا تعيد تسمية أي كود موجود.
+   تعمل فوق الصفحة: تستبدل النصوص وقت العرض فقط بناءً على قاموس
+   مطابقة نص كامل (exact match)، وترجع النص الأصلي عند اختيار "افتراضي".
+══════════════════════════════════════════ */
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "bis-lang";
+  var VALID_LANGS = ["default", "egyptian", "english"];
+
+  /* حاويات لا تُترجم أبدًا — محتوى ديناميكي/رسائل مستخدمين */
+  var EXCLUDE_IDS = [
+    "chatMessages"
+  ];
+  var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEXTAREA: 1 };
+  var ATTRS_TO_TRANSLATE = ["placeholder", "title", "aria-label"];
+
+  var _originalsText = new WeakMap();   // text node -> original text
+  var _observer = null;
+
+  function getDict(lang) {
+    if (lang === "egyptian") return window.BIS_LANG_EGYPTIAN || {};
+    if (lang === "english") return window.BIS_LANG_ENGLISH || {};
+    return null;
+  }
+
+  function isExcluded(el) {
+    while (el) {
+      if (el.id && EXCLUDE_IDS.indexOf(el.id) !== -1) return true;
+      if (el.hasAttribute && el.hasAttribute("data-no-i18n")) return true;
+      el = el.parentElement;
+    }
+    return false;
+  }
+
+  function translateTextNode(node, dict) {
+    var parent = node.parentElement;
+    if (!parent || SKIP_TAGS[parent.tagName]) return;
+    if (isExcluded(parent)) return;
+
+    if (!_originalsText.has(node)) {
+      var raw = node.nodeValue;
+      if (!raw || !raw.trim()) return;
+      _originalsText.set(node, raw);
+    }
+    var original = _originalsText.get(node);
+    var key = original.trim();
+    if (!key) return;
+
+    if (dict === null) {
+      node.nodeValue = original;
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(dict, key)) {
+      /* نحافظ على أي مسافات بيضاء محيطة بالنص الأصلي */
+      var leading = original.match(/^\s*/)[0];
+      var trailing = original.match(/\s*$/)[0];
+      node.nodeValue = leading + dict[key] + trailing;
+    } else {
+      node.nodeValue = original;
+    }
+  }
+
+  function translateAttr(el, attr, dict) {
+    if (isExcluded(el)) return;
+    var mapKey = "_i18nOrig_" + attr;
+    var lastSetKey = "_i18nLastSet_" + attr;
+    var current = el.getAttribute(attr);
+    if (current === null) return;
+
+    /* لو القيمة الحالية هي نفس آخر قيمة إحنا كتبناها بأنفسنا، متعملش حاجة
+       (يمنع حلقة لا نهائية مع الـ MutationObserver اللي بيراقب نفس الخاصية) */
+    if (el[lastSetKey] === current) return;
+    if (!current.trim()) return;
+
+    /* لو القيمة الحالية مش النص الأصلي المحفوظ ولا أي ترجمة معروفة له،
+       يبقى كود الصفحة غيّر النص الأصلي فعليًا (مثال: تبديل placeholder
+       حسب التاب المفتوح) — نحدّث النص الأصلي المحفوظ للنص الجديد */
+    var knownOriginal = el[mapKey];
+    var isKnownVariant = false;
+    if (knownOriginal) {
+      var k = knownOriginal.trim();
+      var eg = getDict("egyptian"), en = getDict("english");
+      isKnownVariant = current === knownOriginal ||
+        (eg && eg[k] === current) || (en && en[k] === current);
+    }
+    if (!knownOriginal || !isKnownVariant) el[mapKey] = current;
+
+    var original = el[mapKey];
+    var key = original.trim();
+    var target = original;
+    if (dict !== null && Object.prototype.hasOwnProperty.call(dict, key)) {
+      target = dict[key];
+    }
+    el[lastSetKey] = target;
+    if (current !== target) el.setAttribute(attr, target);
+  }
+
+  function walkAndTranslate(root, dict) {
+    if (root.nodeType === Node.TEXT_NODE) {
+      translateTextNode(root, dict);
+      return;
+    }
+    if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var node;
+    while ((node = walker.nextNode())) {
+      translateTextNode(node, dict);
+    }
+
+    var attrRoots = root.nodeType === Node.ELEMENT_NODE ? [root] : [];
+    var elems = attrRoots.concat(
+      Array.prototype.slice.call(root.querySelectorAll ? root.querySelectorAll("*") : [])
+    );
+    elems.forEach(function (el) {
+      ATTRS_TO_TRANSLATE.forEach(function (attr) {
+        if (el.hasAttribute && el.hasAttribute(attr)) translateAttr(el, attr, dict);
+      });
+    });
+  }
+
+  function applyLanguage(lang) {
+    if (VALID_LANGS.indexOf(lang) === -1) lang = "default";
+    var dict = getDict(lang);
+    if (document.body) walkAndTranslate(document.body, dict);
+    localStorage.setItem(STORAGE_KEY, lang);
+    document.dispatchEvent(new CustomEvent("bis-lang-changed", { detail: { lang: lang } }));
+  }
+
+  function getLanguage() {
+    var saved = localStorage.getItem(STORAGE_KEY);
+    return VALID_LANGS.indexOf(saved) !== -1 ? saved : "default";
+  }
+
+  function startObserver() {
+    if (_observer) return;
+    _observer = new MutationObserver(function (mutations) {
+      var lang = getLanguage();
+      if (lang === "default") return;
+      var dict = getDict(lang);
+      mutations.forEach(function (m) {
+        /* نص/عناصر جديدة اتضافت (مثلاً innerHTML/textContent اتغيّر) */
+        m.addedNodes && m.addedNodes.forEach(function (n) {
+          if (n.nodeType === Node.ELEMENT_NODE || n.nodeType === Node.TEXT_NODE) {
+            walkAndTranslate(n, dict);
+          }
+        });
+        /* خاصية زي placeholder/title/aria-label اتغيّرت برمجيًا بعد التحميل
+           (مثال: تبديل placeholder صندوق البحث لما تفتح تاب "الأعضاء") */
+        if (m.type === "attributes" && m.target && m.target.nodeType === Node.ELEMENT_NODE) {
+          translateAttr(m.target, m.attributeName, dict);
+        }
+      });
+    });
+    _observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ATTRS_TO_TRANSLATE
+    });
+  }
+
+  function init() {
+    startObserver();
+    applyLanguage(getLanguage());
+  }
+
+  window.BISLang = {
+    setLanguage: applyLanguage,
+    getLanguage: getLanguage
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
