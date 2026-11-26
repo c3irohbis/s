@@ -1,0 +1,26 @@
+/* Entry point: loads the app modules in the original order (js/app/*.js). Split from the former single inline module. */
+import "./app/a-init-config.js";
+import "./app/b-fcm-notif.js";
+import "./app/c-upload-audit-stub.js";
+import "./app/d-state-roles-email.js";
+import "./app/e-toast-confirm.js";
+import "./app/f-nav-chatpage.js";
+import "./app/g-auth-profile-logout.js";
+import "./app/h-avatars.js";
+import "./app/i-authstate.js";
+import "./app/j-dm-open.js";
+import "./app/k-usercache-publicid.js";
+import "./app/l-requests-chat-helpers-ban.js";
+import "./app/m-chat-send-ui.js?v=profanity-2";
+import "./app/n-admin-ban-unban.js";
+import "./app/o-profile-save.js";
+import "./app/p-content-loaders-forum.js";
+import "./app/q-add-content.js";
+import "./app/r-owner-admin-panels.js";
+import "./app/s-badges-display.js";
+import "./app/t-self-listener.js";
+import "./app/u-rooms.js";
+import "./app/v-profile-cards-picctx.js";
+import "./app/w-visit-system.js";
+import "./app/y-reply-fwd.js?v=profanity-1";
+import "./app/z-tail-hooks.js";

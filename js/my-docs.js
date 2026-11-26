@@ -38,6 +38,11 @@
   const COL_SUBJECTS = "docSubjects";
   const COL_ITEMS = "docItems";
 
+  function _sql() {
+    const sql = window.MyDocsSQL;
+    if (!sql || !sql.enabled()) throw new Error("mydocs-sql-unavailable");
+    return sql;
+  }
   async function _fs() {
     if (!window.db) throw new Error("Firebase غير متاح");
     return { db: window.db, ...(await import(_FB)) };
@@ -118,11 +123,9 @@
     const body = _body();
     if (body) body.innerHTML = `<div class="md-loading"><div class="md-spin"></div></div>`;
     try {
-      const { db, collection, getDocs, query, where } = await _fs();
-      const snap = await getDocs(query(collection(db, COL_SUBJECTS), where("worldId", "==", wid)));
+      const rows = await _sql().listSubjects();
       if (generation !== _subjectLoadGeneration || uid !== _uid() || wid !== _worldId()) return;
-      _subjects = [];
-      snap.forEach((d) => { const data = d.data(); if (wid && data.worldId === wid) _subjects.push({ id: d.id, ...data }); });
+      _subjects = rows.filter((d) => wid && d.worldId === wid);
       _loaded = true;
       _loadedUid = uid; _loadedWorld = wid;
       _renderHome();
@@ -166,16 +169,6 @@
   /* ─────────────────────────────────────────
      استعلام العناصر — كل الفروع فيها worldId صراحة
   ───────────────────────────────────────── */
-  async function _queryItems(db, fns, subjectId, worldId, filter, cursor) {
-    const { collection, getDocs, query, where, orderBy, startAfter, limit } = fns;
-    const base = [where("subjectId", "==", subjectId), where("worldId", "==", worldId)];
-    if (["image","pdf","voice","link"].includes(filter)) base.push(where("type", "==", filter));
-    base.push(orderBy("order", filter === "newest" ? "desc" : "asc"));
-    if (cursor) base.push(startAfter(cursor));
-    base.push(limit(ITEM_PAGE_SIZE));
-    return getDocs(query(collection(db, COL_ITEMS), ...base));
-  }
-
   async function _loadItemsPage(more = false) {
     const generation = ++_itemGeneration;
     const uid = _uid(), worldId = _worldId(), subjectId = _currentSubjectId, filter = _filter;
@@ -193,18 +186,12 @@
       if ((!page.items.length && !page.done) || (more && !page.done)) {
         if (!page.pending) {
           page.pending = (async () => {
-            const fns = await _fs();
-            const snap = await _queryItems(fns.db,fns,subjectId,worldId,filter,page.cursor);
+            const res = await _sql().listItems(subjectId, filter, page.cursor);
             const seen = new Set(page.items.map(it=>it.id));
-            snap.docs.forEach(d=>{ if (!seen.has(d.id)) { seen.add(d.id); page.items.push({id:d.id,...d.data()}); } });
-            page.cursor = snap.docs.at(-1) || page.cursor;
-            page.done = snap.size < ITEM_PAGE_SIZE;
+            res.items.forEach(d=>{ if (!seen.has(d.id)) { seen.add(d.id); page.items.push(d); } });
+            if (res.items.length) page.cursor = res.items[res.items.length - 1].order;
+            page.done = res.items.length < ITEM_PAGE_SIZE;
             page.at = Date.now();
-            if (snap.metadata?.fromCache) {
-              // Cached query results do not prove that a page is complete.
-              page.done = false; page.at = 0;
-              if (_itemPages.get(key) === page) _itemPages.delete(key);
-            }
           })().finally(()=>{page.pending=null;});
         }
         await page.pending;
@@ -362,15 +349,11 @@
     if (!name) return;
     _busy = true;
     try {
-      const { db, doc, addDoc, updateDoc, collection, serverTimestamp } = await _fs();
       if (_draftSubject.id) {
-        await updateDoc(doc(db, COL_SUBJECTS, _draftSubject.id), { name, code });
+        const cur = _subjects.find((x) => x.id === _draftSubject.id);
+        await _sql().updateSubject(_draftSubject.id, { name, code }, cur ? cur.__revision : null);
       } else {
-        const wid = _worldId();
-        await addDoc(collection(db, COL_SUBJECTS), {
-          worldId: wid, name, code, status: "active", itemsCount: 0, activeItemsCount: 0,
-          createdAt: serverTimestamp(), archivedAt: null, createdBy: _uid(),
-        });
+        await _sql().createSubject({ name, code });
       }
       const savedId = _draftSubject.id;
       await _load();
@@ -560,27 +543,13 @@
     if (type === "text" && !(_draftItem.text || "").trim()) return;
     _busy = true;
     try {
-      const { db, doc, collection, runTransaction, serverTimestamp, increment } = await _fs();
-      const wid = _worldId();
       const subjectId = _currentSubjectId;
-      await runTransaction(db, async (tx) => {
-        const subjRef = doc(db, COL_SUBJECTS, subjectId);
-        const subjSnap = await tx.get(subjRef);
-        if (!subjSnap.exists()) throw new Error("subject-missing");
-        // itemsCount هنا عدّاد ترقيم فقط (order) ولا يُنقَص أبدًا — نفس انضباط
-        // شيتاتي بالحرف. activeItemsCount عدّاد منفصل للعرض الحي بس، بيزيد
-        // وينقص مع الإضافة/الحذف، وما له أي علاقة بتوليد order.
-        const newOrder = (_num(subjSnap.data().itemsCount) || 0) + 1;
-        const itemRef = doc(collection(db, COL_ITEMS));
-        tx.set(itemRef, {
-          subjectId, worldId: wid, order: newOrder, type,
-          url: _draftItem.url || null,
-          text: _draftItem.text || null,
-          fileName: _draftItem.fileName || null,
-          duration: _draftItem.duration || null,
-          createdAt: serverTimestamp(), createdBy: _uid(),
-        });
-        tx.update(subjRef, { itemsCount: newOrder, activeItemsCount: increment(1) });
+      await _sql().createItem({
+        subjectId, type,
+        url: _draftItem.url || null,
+        text: _draftItem.text || null,
+        fileName: _draftItem.fileName || null,
+        duration: _draftItem.duration || null,
       });
       await _load();
       await window.MyDocsModule._openSubject(subjectId);
@@ -591,10 +560,8 @@
   window.MyDocsModule._deleteItem = async function (id) {
     if (!_isAdmin() || !_currentSubjectId) return;
     try {
-      const { db, doc, deleteDoc, updateDoc, increment } = await _fs();
-      await deleteDoc(doc(db, COL_ITEMS, id));
-      // activeItemsCount فقط بينقص هنا — itemsCount (عدّاد الترقيم) يفضل زي ما هو
-      await updateDoc(doc(db, COL_SUBJECTS, _currentSubjectId), { activeItemsCount: increment(-1) });
+      const cur = _items.find((x) => x.id === id);
+      await _sql().deleteItem(id, cur ? cur.__revision : null);
       await _load();
       await window.MyDocsModule._setFilter(_filter);
     } catch (e) {}
@@ -634,8 +601,8 @@
       confirmLabel: "أرشفة المادة",
       onConfirm: async () => {
         try {
-          const { db, doc, updateDoc, serverTimestamp } = await _fs();
-          await updateDoc(doc(db, COL_SUBJECTS, id), { status: "archived", archivedAt: serverTimestamp() });
+          const cur = _subjects.find((x) => x.id === id);
+          await _sql().archiveSubject(id, cur ? cur.__revision : null);
           await _load();
           window.MyDocsModule._openSubject(id);
         } catch (e) {}
@@ -651,8 +618,8 @@
       confirmLabel: "فتح المادة",
       onConfirm: async () => {
         try {
-          const { db, doc, updateDoc } = await _fs();
-          await updateDoc(doc(db, COL_SUBJECTS, id), { status: "active", archivedAt: null });
+          const cur = _subjects.find((x) => x.id === id);
+          await _sql().reopenSubject(id, cur ? cur.__revision : null);
           await _load();
           window.MyDocsModule._openSubject(id);
         } catch (e) {}
