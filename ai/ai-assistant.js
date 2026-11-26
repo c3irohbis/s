@@ -47,7 +47,7 @@
   }
   function render() {
     const body=document.getElementById('aiChatBody'); if(!body) return;
-    body.innerHTML=`<div class="bariq-hero"><span aria-hidden="true" class="bariq-local-mark">ب</span><div><strong>بريق معاك</strong><span>دليلك للموقع، خطوة بخطوة</span></div></div>`+messages.map(m=>`<div class="msg-row ${m.out?'me':'other'}"><div class="msg-bubble-group"><div class="msg-line"><div class="bubble ${m.out?'me':'other'}"><div class="bubble-text">${m.topic?topicHtml(byId[m.topic]):escape(m.text)}${m.table?tableHtml(m.table):''}${m.founder?'<button type="button" class="bariq-action" data-bariq-founder>عمر ناصر · زيارة البروفايل</button><p class="bariq-action-note">الضغط يفتح البروفايل الأصلي بقراءته العادية. الإجابة نفسها لا تجلب بيانات.</p>':''}${m.choices?`<div class="bariq-options">${m.choices.map(chip).join('')}</div>`:''}</div></div></div><div class="bubble-meta ${m.out?'':'other'}"><span class="bubble-time">${new Date(m.ts).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'})}</span></div></div></div>`).join('');
+    body.innerHTML=`<div class="bariq-hero"><span aria-hidden="true" class="bariq-local-mark">ب</span><div><strong>بريق معاك</strong><span>دليلك للموقع، خطوة بخطوة</span></div></div>`+messages.map(m=>m.thinking?`<div class="msg-row other"><div class="msg-bubble-group"><div class="msg-line"><div class="bubble other"><div class="bubble-text bariq-thinking">بريق بيفكر…</div></div></div></div></div>`:`<div class="msg-row ${m.out?'me':'other'}"><div class="msg-bubble-group"><div class="msg-line"><div class="bubble ${m.out?'me':'other'}"><div class="bubble-text">${m.topic?topicHtml(byId[m.topic]):escape(m.text)}${m.table?tableHtml(m.table):''}${m.founder?'<button type="button" class="bariq-action" data-bariq-founder>عمر ناصر · زيارة البروفايل</button><p class="bariq-action-note">الضغط يفتح البروفايل الأصلي بقراءته العادية. الإجابة نفسها لا تجلب بيانات.</p>':''}${m.choices?`<div class="bariq-options">${m.choices.map(chip).join('')}</div>`:''}</div></div></div><div class="bubble-meta ${m.out?'':'other'}"><span class="bubble-time">${new Date(m.ts).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'})}</span></div></div></div>`).join('');
     const rows=body.querySelectorAll('.msg-row');
     if(rows.length>1) rows[rows.length-1].scrollIntoView({block:'start',behavior:'instant'});
     else body.scrollTop=0;
@@ -102,17 +102,47 @@
   function choose(id) {if(!byId[id])return;lastTopic=id;push({out:true,text:byId[id].title});push({topic:id});}
   window._aiListItem=()=>({id:'ai',name:'بريق',photo:'',cls:'ai',lastMsg:'دليلك للموقع • شرح وخطوات واختصارات',lastTime:null,unread:0});
   window._openAiChat=()=>{guard();window.showPage?.('page-ai-chat');if(!messages.length) root();else render();};
-  window._sendToAI=()=>{
+  async function askGateway(q) {
+    if(window.__BLISS_AI_MODE!=='gateway'||!window.__BLISS_AI_ENDPOINT)return false;
+    const user=window.currentUser;if(!user)return false;
+    const a=account();
+    const history=messages.filter(m=>!m.thinking&&typeof m.text==='string'&&m.text&&!m.topic&&!m.table).slice(-8);
+    const pairs=[];
+    for(let i=0;i<history.length;i++){const m=history[i];if(m.out&&history[i+1]&&!history[i+1].out){pairs.push({q:m.text,a:history[i+1].text});i++;}}
+    let token;try{token=await user.getIdToken();}catch{return false;}
+    try{
+      const r=await fetch(window.__BLISS_AI_ENDPOINT,{method:'POST',cache:'no-store',signal:AbortSignal.timeout(window.__BLISS_AI_TIMEOUT_MS||12000),headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({q,history:pairs.slice(-4)})});
+      if(!r.ok)return false;
+      const j=await r.json();
+      const reply=typeof j.reply==='string'?j.reply.trim():'';
+      if(!reply)return false;
+      push({text:reply,ai:true});
+      return true;
+    }catch{return false;}
+  }
+  window._sendToAI=async ()=>{
     guard();if(sending)return;
     const input=document.getElementById('aiChatInput'),text=(input?.value||'').trim();if(!text)return;
     if(text.length>500){window.toast?.('خلي السؤال أقل من ٥٠٠ حرف عشان أوصّلك بسرعة','warn');return;}
     sending=true;input.value='';push({out:true,text});
-    if(localReply(text)){sending=false;return;}
-    const ids=match(text);
-    if(ids.length===1){lastTopic=ids[0];push({topic:ids[0]});}
-    else if(ids.length>1)push({text:'تقصد أنهي موضوع من دول يا صاحبي؟',choices:ids});
-    else push({text:'مش فاهمك يا صاحبي',choices:kb.roots});
-    sending=false;
+    try{
+      if(localReply(text))return;
+      // أسئلة المحتوى والبيانات تسبق المطابقة الموضوعية وتروح للبوابة مباشرة: بريق عنده فهرس الكروت ولقطة KV مشتركة (صفر قراءات قاعدة وقت السؤال)
+      const wantsData=/(كام|عدد|عده|اخر|جديد|جداد|امتى|ميعاد|موعد|مواعيد|وصل|وصلت|نزل|نزلت|عندي|نتيج|درج|حضور|غياب|قسط|فلوس|باقي|فاضي|موجود|موجوده|اتغير|تغير|تغيرت|latest|how many|when is|available)/.test(norm(text));
+      const ids=wantsData?[]:match(text);
+      if(ids.length===1){lastTopic=ids[0];push({topic:ids[0]});return;}
+      if(ids.length>1){push({text:'تقصد أنهي موضوع من دول يا صاحبي؟',choices:ids});return;}
+      push({thinking:true});
+      let answered=false;
+      try{answered=await askGateway(text);}
+      catch(_){answered=false;}
+      finally{messages=messages.filter(m=>!m.thinking);}
+      const fallbackIds=wantsData?match(text):ids;
+      if(!answered&&fallbackIds.length===1){lastTopic=fallbackIds[0];push({topic:fallbackIds[0]});}
+      else if(!answered&&fallbackIds.length>1)push({text:'تقصد أنهي موضوع من دول يا صاحبي؟',choices:fallbackIds});
+      else if(!answered)push({text:'مش فاهمك يا صاحبي',choices:kb.roots});
+      else render();
+    }finally{sending=false;}
   };
   document.addEventListener('click',e=>{
     const btn=e.target.closest('[data-bariq-topic],[data-bariq-action],[data-bariq-root],[data-bariq-founder]');if(!btn)return;guard();
@@ -130,5 +160,5 @@
     new MutationObserver(()=>guard()).observe(document.body,{attributes:true,attributeFilter:['class'],subtree:true});
   });
   // Read-only diagnostics for dev tests, no personal content.
-  window.BariqGuide = Object.freeze({match,normalize:norm,topicCount:kb.topics.length,actionIds:[],mode:"memory-only-v2"});
+  window.BariqGuide = Object.freeze({match,normalize:norm,topicCount:kb.topics.length,actionIds:[],mode:"hybrid-gateway-v3"});
 })();
