@@ -1,0 +1,152 @@
+/* ══════════════════════════════════════════════════════════════
+   CHAT CONTEXT MENU — أوامر قائمة سياق الرسائل
+   ▸ منقولة حرفيًا من index.html (بدون أي تعديل منطقي)
+   ▸ تعتمد على window._ctxData / window._ctxDocId (bridges get+set
+     في index.html — لازمين لأن _showCtxAt بتكتب عليهم) و
+     window.currentUser / window.isAdmin / window.isOwner
+   ══════════════════════════════════════════════════════════════ */
+
+function _showCtxAt(x, y, docId, data) {
+  _ctxDocId = docId; _ctxData = data;
+  const overlay = document.getElementById("msgCtxOverlay");
+  const isMe = data.uid === currentUser?.uid;
+  const delBtn = document.getElementById("ctxDeleteBtn");
+  if (delBtn) delBtn.style.display = (isMe || isAdmin()) ? "" : "none";
+  const editBtn = document.getElementById("ctxEditBtn");
+  const editSep = document.getElementById("ctxEditSep");
+  const _editAge = data.createdAt?.toMillis ? (Date.now() - data.createdAt.toMillis()) : Infinity;
+  const canEdit = isMe && !data.deleted && !data.image && !data.audio && !data.pdf && !data.file && data.text && _editAge < 15 * 60 * 1000;
+  if (editBtn) editBtn.style.display = canEdit ? "" : "none";
+  if (editSep) editSep.style.display = canEdit ? "" : "none";
+  // Report button — only for others' messages, not deleted
+  const rptBtn = document.getElementById("ctxReportBtn");
+  const rptSep = document.getElementById("ctxReportSep");
+  const showRpt = !isMe && !data.deleted;
+  if (rptBtn) rptBtn.style.display = showRpt ? "" : "none";
+  if (rptSep) rptSep.style.display = showRpt ? "" : "none";
+  // Forward button — hide for deleted messages
+  const fwdBtn = document.getElementById("ctxForwardBtn");
+  if (fwdBtn) fwdBtn.style.display = data.deleted ? "none" : "";
+  // Pin button — only admins/owner can pin, hide for deleted
+  const pinBtn = document.getElementById("ctxPinBtn");
+  if (pinBtn) {
+    const canPin = (isAdmin() || isOwner()) && !data.deleted;
+    pinBtn.style.display = canPin ? "" : "none";
+    // Show thumbtack-slash if already pinned
+    const isPinned = window._pinnedMsgId && window._pinnedMsgId === docId;
+    pinBtn.innerHTML = isPinned
+      ? '<i class="fa-solid fa-thumbtack-slash" style="color:var(--gold)"></i>'
+      : '<i class="fa-solid fa-thumbtack"></i>';
+    pinBtn.title = isPinned ? "إلغاء التثبيت" : "تثبيت الرسالة";
+  }
+  const copyBtn = document.getElementById("ctxCopyBtn");
+  if (copyBtn) copyBtn.style.display = (data.text && !data.deleted) ? "" : "none";
+  const _ctxFileUrl = data.image || data.pdf || data.audio || data.fileUrl || data.url || null;
+  const copyLinkBtn = document.getElementById("ctxCopyLinkBtn");
+  const copyLinkSep = document.getElementById("ctxCopyLinkSep");
+  if (copyLinkBtn) copyLinkBtn.style.display = (_ctxFileUrl && !data.deleted) ? "" : "none";
+  if (copyLinkSep) copyLinkSep.style.display = (_ctxFileUrl && !data.deleted) ? "" : "none";
+  // ── Highlight current user's reaction ──
+  const myUid = currentUser?.uid;
+  const reactions = data.reactions || {};
+  document.querySelectorAll("#ctxReactionBar .reaction-btn").forEach(btn => {
+    const emoji = btn.dataset.emoji;
+    const voters = reactions[emoji] || [];
+    btn.classList.toggle("my-pick", Array.isArray(voters) && voters.includes(myUid));
+  });
+  if (overlay) overlay.style.display = "block";
+
+  // ── الهيدر العادي يختفي وتظهر بدله قائمة أوامر بنفس تصميم الـ glass pill،
+  //    وصف الإيموجي بيظهر مثبّت (fixed) تحت الرسالة نفسها من غير أي بطاقة/خلفية ──
+  const ncHeader   = document.querySelector(".nc-header");
+  const headerPill = document.getElementById("ctxHeaderPill");
+  const closeBtn   = document.getElementById("ctxHeaderCloseBtn");
+  const actionRow  = document.querySelector(".ctx-action-row");
+  const reactBar   = document.getElementById("ctxReactionBar");
+  const targetRow  = document.getElementById(`msg-${docId}`);
+
+  if (ncHeader && headerPill && actionRow) {
+    headerPill.insertBefore(actionRow, closeBtn || null);
+    const hRect = ncHeader.getBoundingClientRect();
+    document.body.appendChild(headerPill); // برة #page-chat تمامًا (z-index:200 بس) عشان تقدر تتعدى الأوفرلاي
+    headerPill.style.top   = (hRect.top + 14) + "px";
+    headerPill.style.left  = (hRect.left + 10) + "px";
+    headerPill.style.right = Math.max(0, window.innerWidth - hRect.right + 10) + "px";
+    ncHeader.classList.add("ctx-mode");
+    headerPill.classList.add("show");
+  }
+  if (targetRow && reactBar) {
+    const rect  = targetRow.getBoundingClientRect();
+    const isMe  = targetRow.classList.contains("me");
+    document.body.appendChild(reactBar); // خارج قائمة الرسائل تمامًا، عشان ما نرفعش طبقتها كلها فوق الأوفرلاي
+    reactBar.classList.add("emoji-picker-inline");
+    const setSide = () => {
+      if (isMe) { reactBar.style.right = Math.max(10, window.innerWidth - rect.right) + "px"; reactBar.style.left = "auto"; }
+      else      { reactBar.style.left  = Math.max(10, rect.left) + "px"; reactBar.style.right = "auto"; }
+    };
+    setSide();
+    reactBar.style.top = (rect.bottom + 6) + "px";
+    reactBar.classList.add("show");
+    requestAnimationFrame(() => {
+      const barH = reactBar.offsetHeight || 40;
+      if (rect.bottom + 6 + barH > window.innerHeight - 70) {
+        reactBar.style.top = Math.max(60, rect.top - barH - 6) + "px";
+      }
+    });
+  }
+
+  window._ctxJustOpened = true;
+  setTimeout(() => { window._ctxJustOpened = false; }, 350);
+}
+window._showCtxAt = _showCtxAt;
+
+function showMsgCtxMenu(e, docId, data) {
+  e.preventDefault(); e.stopPropagation();
+  const x = e.clientX || e.touches?.[0]?.clientX || window.innerWidth/2;
+  const y = e.clientY || e.touches?.[0]?.clientY || window.innerHeight/2;
+  _showCtxAt(x, y, docId, data);
+}
+window.showMsgCtxMenu = showMsgCtxMenu;
+
+function hideMsgCtxMenu() {
+  const overlay = document.getElementById("msgCtxOverlay");
+  if (overlay) overlay.style.display = "none";
+
+  const ncHeader   = document.querySelector(".nc-header");
+  const headerPill = document.getElementById("ctxHeaderPill");
+  const reactBar   = document.getElementById("ctxReactionBar");
+  if (ncHeader) ncHeader.classList.remove("ctx-mode");
+  if (headerPill) headerPill.classList.remove("show");
+  if (reactBar) reactBar.classList.remove("show");
+}
+window.hideMsgCtxMenu = hideMsgCtxMenu;
+
+function ctxDelete() {
+  hideMsgCtxMenu();
+  if (!_ctxDocId) return;
+  if (typeof adminDeleteMsg === "function") adminDeleteMsg(_ctxDocId);
+}
+window.ctxDelete = ctxDelete;
+
+function ctxForward() {
+  hideMsgCtxMenu();
+  if (!_ctxData) return;
+  openFwdModal(_ctxData);
+}
+window.ctxForward = ctxForward;
+
+function ctxCopy() {
+  hideMsgCtxMenu();
+  if (!_ctxData?.text) return;
+  navigator.clipboard?.writeText(_ctxData.text).then(() => toast("تم النسخ","success")).catch(() => toast("فشل النسخ","error"));
+}
+window.ctxCopy = ctxCopy;
+
+function ctxCopyLink() {
+  hideMsgCtxMenu();
+  if (!_ctxData) return;
+  const url = _ctxData.image || _ctxData.pdf || _ctxData.audio || _ctxData.fileUrl || _ctxData.url || null;
+  if (!url) return;
+  navigator.clipboard?.writeText(url).then(() => toast("تم نسخ الرابط","success")).catch(() => toast("فشل نسخ الرابط","error"));
+}
+window.ctxCopyLink = ctxCopyLink;

@@ -334,6 +334,8 @@ body {
 .forum-card-icon--grades     { background: linear-gradient(160deg, #ffe173, #f0b90b); }
 .forum-card-icon--military,
 .forum-card-icon--logo { background: transparent; box-shadow: none; width: auto; height: auto; border-radius: 0; }
+/* تثبيت حجم شعار العسكرية على لاندنج المنتدى — military.css بتتحمّل كسولًا بعد فتح القسم فقط، فمن غير القاعدة دي الصورة بتترسم بحجمها الطبيعي وتمطّط صف الكروت */
+.forum-card-icon--military img { width:44px; height:44px; object-fit:contain; display:block; filter:drop-shadow(0 2px 8px rgba(0,0,0,.35)); }
 
 /* توهج خفيف بلون الكارت — نفس نمط "انت ليه هنا؟"، مطبّق على باقي كروت المنتدى */
 .forum-section-card:has(.forum-card-icon--news)::after,
