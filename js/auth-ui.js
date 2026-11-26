@@ -543,6 +543,23 @@ function _femaleSVG(size) {
       };
       submitReg();
     });
+    /* متصفح داخل تطبيق (واتساب/فيسبوك/إنستاجرام/تيليجرام…): Google يمنع تسجيل الدخول
+       داخل هذه المتصفحات، والتكملة في متصفح خارجي تترك هذا المتصفح بدون جلسة.
+       نمنع الزر ونوضح إن الموقع يُفتح في متصفح خارجي أولًا. */
+    var _ua = navigator.userAgent || "";
+    var IN_APP_UA = /(FBAN|FBAV|FB_IAB|Instagram|WhatsApp|Telegram|Line\/|Snapchat|TikTok|; wv\)| wv\/)/i.test(_ua)
+      || (/(iPhone|iPad|iPod)/i.test(_ua) && /AppleWebKit/i.test(_ua) && !/Safari/i.test(_ua));
+    if (IN_APP_UA) {
+      var inAppNote = "تسجيل Google لا يعمل من متصفح داخل تطبيق. افتح الموقع في Chrome أو Safari أولًا ثم سجّل دخولك.";
+      [["googleBtn", "loginAlert"], ["methodGoogle", "regAlert"]].forEach(function (pair) {
+        var b = $(pair[0]); if (!b) return;
+        b.addEventListener("click", function (e) {
+          e.preventDefault(); e.stopImmediatePropagation();
+          setAlert(pair[1], inAppNote);
+        }, true);
+      });
+    }
+
     $("methodMail").addEventListener("click", function () {
       if (!$("mailBox").hidden) {            /* ضغطة ثانية على البريد → إخفاء الحقول والرجوع للأصل */
         $("mailBox").hidden = true; pendingMethod = null;
@@ -614,7 +631,13 @@ function _femaleSVG(size) {
         removeLoading(); stopSplash(); stopCooldown(); closeScreens(); setView("login");
       },
       /* انتهت الجلسة أثناء انتظار تأكيد البريد */
-      sessionEnded: function () { if (S.pending) { S.pending = null; save(); if (!$("screenVerify").hidden) go("login"); } }
+      sessionEnded: function () { if (S.pending) { S.pending = null; save(); if (!$("screenVerify").hidden) go("login"); } },
+      /* نتائج دخول Google بعد الرجوع من redirect (يستدعيها js/auth-bridge.js) */
+      googleFail: function (msg) { removeLoading(); go("login"); setAlert("loginAlert", msg || "حدث خطأ، حاول مرة أخرى."); },
+      googleExists: function () { go("register"); showExists(); },
+      clearDraft: function () { S.draft = null; save(); },
+      /* يستخدمه auth-bridge لاسترجاع مسودة التسجيل عند رجوع redirect فقد ماركره */
+      getDraft: function () { return S.draft ? { name: S.draft.name, gender: S.draft.gender, dept: S.draft.dept, year: S.draft.year, terms: !!S.draft.terms } : null; }
     };
     $("verifyOk").addEventListener("click", function () {
       if (!S.pending) return go("register");
