@@ -25,6 +25,7 @@ export async function handleAuthority(request,env,user,{rpc}) {
   let target=input.targetUid,value=input.value;
   if(action==='provision'){
    target=user.sub;
+   if(user.email_verified!==true)return reply(403,{error:'email-unverified'});
    if(!value||typeof value!=='object'||Array.isArray(value))return reply(400,{error:'invalid-profile'});
    value={name:value.name,gender:value.gender,worldId:value.worldId,email:typeof user.email==='string'?user.email:''};
   }

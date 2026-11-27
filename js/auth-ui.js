@@ -270,7 +270,7 @@ function _femaleSVG(size) {
      ══════════════════════════════════════════════════════════════════════ */
   var NOT_CONNECTED = "لم يتم ربط نظام المصادقة بعد.";
   var bridge = window.AuthBridge = window.AuthBridge || {};
-  ["loginEmail", "google", "sendEmailLink", "resendEmailLink", "checkEmailVerified", "saveProfile", "resetPassword", "checkResetCode", "confirmReset", "applyVerify"].forEach(function (m) {
+  ["loginEmail", "google", "sendEmailLink", "resendEmailLink", "checkEmailVerified", "sendVerification", "pollVerified", "cancelVerification", "saveProfile", "resetPassword", "checkResetCode", "confirmReset", "applyVerify"].forEach(function (m) {
     if (typeof bridge[m] !== "function") bridge[m] = function () { return { status: "error", message: NOT_CONNECTED }; };
   });
   var bridgeReady = new Promise(function (res) { window.__resolveAuthBridge = res; });
@@ -562,7 +562,7 @@ function _femaleSVG(size) {
 
     $("methodMail").addEventListener("click", function () {
       if (!$("mailBox").hidden) {            /* ضغطة ثانية على البريد → إخفاء الحقول والرجوع للأصل */
-        $("mailBox").hidden = true; pendingMethod = null;
+        $("mailBox").hidden = true; pendingMethod = null; if (window.__authVerifyReset) window.__authVerifyReset(true);
         $("mailEmail").value = ""; $("mailPass").value = ""; $("mailPass").type = "password";
         var eb = document.querySelector('[data-eye="mailPass"]'); if (eb) { eb.innerHTML = ICON_EYE; eb.setAttribute("aria-pressed", "false"); }
         clearAlert("mailAlert"); $("mailEmail").classList.remove("is-invalid"); $("mailPass").classList.remove("is-invalid");
@@ -572,19 +572,100 @@ function _femaleSVG(size) {
       if (!regComplete()) { submitReg(); return; }   /* بيانات ناقصة: ما نفتحش حقول البريد */
       $("mailBox").hidden = false; submitReg(); $("mailEmail").focus();
     });
-    ["mailEmail", "mailPass"].forEach(function (id) { $(id).addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); $("mailSend").click(); } }); });
-    function sendMail() {
+    ["mailEmail", "mailPass"].forEach(function (id) { $(id).addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); if (!$("mailSend").disabled) $("mailSend").click(); else $("mailVerify").click(); } }); });
+    /* ── تحقق البريد قبل إنشاء الحساب: زر بجوار البريد + فحص تلقائي للتفعيل ── */
+    var VF = { state: "idle", email: "", cd: 0, cdT: null, poll: null, until: 0, busy: false, gen: 0 };
+    var vBtn = document.createElement("button");
+    vBtn.type = "button"; vBtn.id = "mailVerify"; vBtn.className = "btn"; vBtn.textContent = "تحقق من الإيميل";
+    vBtn.style.cssText = "flex:none;width:auto;min-width:0;white-space:nowrap;padding:0 14px;margin:0;font-size:13px";
+    var vField = $("mailEmail").parentNode;
+    vField.style.display = "flex"; vField.style.gap = "8px"; vField.style.alignItems = "stretch";
+    $("mailEmail").style.flex = "1 1 auto"; $("mailEmail").style.minWidth = "0";
+    vField.appendChild(vBtn);
+    $("mailSend").disabled = true;
+    function vRender() {
+      var st = VF.state, ro = st === "sending" || st === "sent" || st === "verified";
+      $("mailEmail").readOnly = ro; $("mailPass").readOnly = ro;
+      $("mailSend").disabled = st !== "verified"; $("mailSend").style.opacity = st === "verified" ? "" : ".5"; $("mailSend").style.cursor = st === "verified" ? "" : "not-allowed";
+      if (st === "verified") { vBtn.textContent = "تم التحقق ✓"; vBtn.disabled = true; }
+      else if (st === "sending") { vBtn.textContent = "جارٍ الإرسال…"; vBtn.disabled = true; }
+      else if (st === "sent") {
+        vBtn.disabled = VF.cd > 0;
+        vBtn.textContent = VF.cd > 0 ? "تم الإرسال ✓ (" + VF.cd + ")" : "إعادة الإرسال";
+      } else { vBtn.textContent = "تحقق من الإيميل"; vBtn.disabled = false; }
+    }
+    function vStopTimers() { clearInterval(VF.cdT); VF.cdT = null; clearInterval(VF.poll); VF.poll = null; }
+    function vReset(silent) {
+      var was = VF.state !== "idle";
+      VF.gen++; vStopTimers(); VF.state = "idle"; VF.email = ""; VF.cd = 0; VF.busy = false; vRender();
+      if (was) VF.cancelP = invoke("cancelVerification");
+      if (!silent) clearAlert("mailAlert");
+    }
+    window.__authVerifyReset = vReset;
+    function vCheck() {
+      if (VF.state !== "sent" || VF.busy) return;
+      if (Date.now() > VF.until) { vStopTimers(); setAlert("mailAlert", "انتهت مهلة الانتظار. اضغط إعادة الإرسال."); return; }
+      VF.busy = true; var g = VF.gen;
+      invoke("pollVerified").then(function (r) {
+        if (g !== VF.gen) return;
+        VF.busy = false;
+        if (VF.state !== "sent") return;
+        if (r.status === "verified") { vStopTimers(); VF.state = "verified"; vRender(); setAlert("mailAlert", "تم التحقق من بريدك. اضغط إنشاء الحساب.", "ok"); }
+      });
+    }
+    function vStartPoll() {
+      clearInterval(VF.poll); VF.until = Date.now() + 10 * 60 * 1000;
+      VF.poll = setInterval(function () { if (!document.hidden) vCheck(); }, 5000);
+    }
+    function vCooldown() {
+      VF.cd = 60; clearInterval(VF.cdT);
+      VF.cdT = setInterval(function () { VF.cd--; if (VF.cd <= 0) { VF.cd = 0; clearInterval(VF.cdT); VF.cdT = null; } vRender(); }, 1000);
+    }
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) vCheck(); });
+    window.addEventListener("focus", vCheck);
+    $("mailEmail").addEventListener("input", function () { if (VF.state !== "idle") vReset(); });
+    vBtn.addEventListener("click", function () {
+      if (VF.busy || vBtn.disabled) return;
       clearAlert("mailAlert");
+      if (!regComplete()) { submitReg(); return; }
+      if (VF.state === "sent") {
+        VF.busy = true; var rg = VF.gen;
+        invoke("resendEmailLink").then(function (r) {
+          if (rg !== VF.gen) return;
+          VF.busy = false;
+          if (r.status !== "sent") return setAlert("mailAlert", r.message || "تعذّر إرسال الرابط، حاول مرة أخرى.");
+          setAlert("mailAlert", "تم إرسال رابط جديد. شوف الوارد أو السبام.", "ok"); vCooldown(); vStartPoll(); vRender();
+        });
+        return;
+      }
       var em = $("mailEmail").value.trim().toLowerCase();
       if (!em || !EMAIL_RE.test(em)) { setAlert("mailAlert", "اكتب بريدًا إلكترونيًا صحيحًا."); markInvalid("mailEmail"); return; }
       var pw = $("mailPass").value;
       if (!pw) { setAlert("mailAlert", "اكتب كلمة المرور."); markInvalid("mailPass"); return; }
       if (pw.length < 6) { setAlert("mailAlert", "كلمة المرور يجب ألا تقل عن 6 أحرف."); markInvalid("mailPass"); return; }
-      call("sendEmailLink", { email: em, password: pw, profile: S.draft }, "جارٍ إنشاء حسابك…").then(function (r) {
-        $("mailPass").value = "";
+      VF.state = "sending"; VF.busy = true; vRender(); var sg = VF.gen;
+      Promise.resolve(VF.cancelP).then(function (c) { if (c && c.status === "error") return { status: "error", message: "تعذّر إنهاء المحاولة السابقة، أعد تحميل الصفحة وحاول." }; return invoke("sendVerification", { email: em, password: pw }); }).then(function (r) {
+        if (sg !== VF.gen) return;
+        VF.busy = false;
+        if (r.status === "sent" || r.status === "verified") {
+          VF.email = em; VF.state = r.status === "verified" ? "verified" : "sent"; vRender();
+          if (VF.state === "sent") { vCooldown(); vStartPoll(); setAlert("mailAlert", "أرسلنا رابط التحقق إلى بريدك. افتحه واضغط عليه، وشوف السبام لو ماظهرش. ارجع هنا وهيتفعّل تلقائيًا.", "ok"); }
+          else setAlert("mailAlert", "تم التحقق من بريدك. اضغط إنشاء الحساب.", "ok");
+          vRender(); return;
+        }
+        VF.state = "idle"; vRender();
+        if (r.status === "exists") { markInvalid("mailEmail"); return setAlert("mailAlert", "هذا البريد الإلكتروني مسجّل بالفعل. جرّب تسجيل الدخول بدلًا من ذلك."); }
+        setAlert("mailAlert", r.message || "تعذّر إرسال رابط التحقق، حاول مرة أخرى.");
+      });
+    });
+    function sendMail() {
+      clearAlert("mailAlert");
+      var em = $("mailEmail").value.trim().toLowerCase();
+      if (VF.state !== "verified" || em !== VF.email) { setAlert("mailAlert", "تحقق من بريدك الإلكتروني أولًا."); return; }
+      call("sendEmailLink", { email: em, profile: S.draft }, "جارٍ إنشاء حسابك…").then(function (r) {
         afterAuth(r, function (x) {
-          go("register"); $("mailBox").hidden = false; $("mailEmail").value = em; markInvalid("mailEmail");
-          setAlert("mailAlert", x.status === "exists" ? "هذا البريد الإلكتروني مسجّل بالفعل. جرّب تسجيل الدخول بدلًا من ذلك." : (x.message || "تعذّر إنشاء الحساب، حاول مرة أخرى."));
+          go("register"); $("mailBox").hidden = false; $("mailEmail").value = em;
+          setAlert("mailAlert", x.message || "تعذّر إنشاء الحساب، حاول مرة أخرى.");
         });
       });
     }
@@ -627,7 +708,7 @@ function _femaleSVG(size) {
       complete: function (p) { profile = p || {}; go("complete"); },
       /* بعد تسجيل الخروج: تفريغ الحقول والرجوع لعرض الدخول (بدون تغيير حالة المصباح) */
       reset: function () {
-        ["loginEmail", "loginPass", "loginName", "mailEmail", "mailPass"].forEach(function (id) { var e = $(id); if (e) e.value = ""; });
+        ["loginEmail", "loginPass", "loginName", "mailEmail", "mailPass"].forEach(function (id) { var e = $(id); if (e) e.value = ""; }); if (window.__authVerifyReset) window.__authVerifyReset(true);
         removeLoading(); stopSplash(); stopCooldown(); closeScreens(); setView("login");
       },
       /* انتهت الجلسة أثناء انتظار تأكيد البريد */
