@@ -1,1 +1,0 @@
-window.__BLISS_SHEETS_MODE='supabase';window.__BLISS_SHEETS_ANON_KEY=window.__BLISS_NEWS_ANON_KEY;

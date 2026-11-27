@@ -73,27 +73,12 @@ async function gmailTokenFresh(env, f) {
 
 const mimeWord = (s) => '=?UTF-8?B?' + btoa(String.fromCharCode(...enc.encode(s))) + '?=';
 const b64lines = (s) => btoa(String.fromCharCode(...enc.encode(s))).replace(/.{1,76}/g, '$&\r\n');
-const escHtml = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export function buildMessage(to, link, fromAddr) {
-  const text = [
-    'مرحبًا،', '',
-    'وصلنا طلب لإنشاء حساب في منتدى الجامعة بهذا البريد الإلكتروني (' + to + ').', '',
-    'لإكمال إنشاء الحساب وتحديد كلمة المرور، افتح هذا الرابط:', link, '',
-    'الرابط صالح لمدة 30 دقيقة ويُستخدم مرة واحدة فقط.', '',
-    'إذا لم تطلب إنشاء حساب، تجاهل هذه الرسالة. لن يُنشأ أي حساب ولن يُحفظ أي شيء، ويُحذف الطلب تلقائيًا.', '',
-    'منتدى الجامعة'].join('\r\n');
-  const html = '<!DOCTYPE html><html lang="ar" dir="rtl"><body style="margin:0;padding:16px;background:#ffffff"><div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;font-size:15px;line-height:1.9;color:#222;max-width:520px">'
-    + '<p>مرحبًا،</p>'
-    + '<p>وصلنا طلب لإنشاء حساب في منتدى الجامعة بهذا البريد الإلكتروني (<span dir="ltr">' + escHtml(to) + '</span>).</p>'
-    + '<p>لإكمال إنشاء الحساب وتحديد كلمة المرور، اضغط على الزر:</p>'
-    + '<p><a href="' + escHtml(link) + '" style="background:#2563eb;color:#ffffff;padding:10px 22px;border-radius:8px;text-decoration:none;display:inline-block">إكمال إنشاء الحساب</a></p>'
-    + '<p style="color:#555;font-size:13px">أو انسخ هذا الرابط في المتصفح:<br><a href="' + escHtml(link) + '" dir="ltr" style="color:#555;word-break:break-all">' + escHtml(link) + '</a></p>'
-    + '<p style="color:#555;font-size:13px">الرابط صالح لمدة 30 دقيقة ويُستخدم مرة واحدة فقط.<br>إذا لم تطلب إنشاء حساب، تجاهل هذه الرسالة. لن يُنشأ أي حساب ولن يُحفظ أي شيء، ويُحذف الطلب تلقائيًا.</p>'
-    + '<p style="color:#555;font-size:13px">منتدى الجامعة</p></div></body></html>';
+  const text = 'مرحبًا،\r\n\r\nلإكمال إنشاء حسابك في منتدى الجامعة، افتح الرابط التالي وحدّد كلمة المرور:\r\n' + link + '\r\n\r\nالرابط صالح لمدة 30 دقيقة ويُستخدم مرة واحدة فقط.\r\nإذا لم تطلب إنشاء حساب، تجاهل هذه الرسالة وسيُحذف الطلب تلقائيًا.';
+  const html = '<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;font-size:15px;line-height:1.8"><p>مرحبًا،</p><p>لإكمال إنشاء حسابك في منتدى الجامعة، اضغط على الزر وحدّد كلمة المرور:</p><p><a href="' + link + '" style="background:#2563eb;color:#fff;padding:10px 22px;border-radius:8px;text-decoration:none;display:inline-block">إكمال إنشاء الحساب</a></p><p style="color:#555">الرابط صالح لمدة 30 دقيقة ويُستخدم مرة واحدة فقط.<br>إذا لم تطلب إنشاء حساب، تجاهل هذه الرسالة وسيُحذف الطلب تلقائيًا.</p></div>';
   const bnd = 'b_' + b64url(crypto.getRandomValues(new Uint8Array(12)));
   return [
-    'From: ' + mimeWord(SENDER_NAME) + ' <' + fromAddr + '>', 'To: ' + to, 'Reply-To: ' + fromAddr, 'Subject: ' + mimeWord(SUBJECT),
-    'Auto-Submitted: auto-generated', 'X-Auto-Response-Suppress: All', 'Content-Language: ar', 'MIME-Version: 1.0',
+    'From: ' + mimeWord(SENDER_NAME) + ' <' + fromAddr + '>', 'To: ' + to, 'Subject: ' + mimeWord(SUBJECT), 'MIME-Version: 1.0',
     'Content-Type: multipart/alternative; boundary="' + bnd + '"', '',
     '--' + bnd, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64lines(text),
     '--' + bnd, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64lines(html),

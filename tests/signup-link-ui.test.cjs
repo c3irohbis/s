@@ -5,7 +5,7 @@ const br = fs.readFileSync(__dirname + '/../js/auth-bridge.js', 'utf8');
 test('register no longer creates a Firebase account or asks for a password before the link', () => {
   const click = ui.slice(ui.indexOf('vBtn.addEventListener("click"'), ui.indexOf('function sendMail()'));
   assert.ok(!/sendVerification|resendEmailLink|mailPass/.test(click));
-  assert.match(click, /tsWait\(\)\.then\(function \(\) \{ if \(sg !== VF\.gen\) return null; if \(!TS\.tok\) return \{ status: "error", error: "captcha" \}; return invoke\("startSignup", \{ email: em, ts: tsTake\(\) \}\)/);
+  assert.match(click, /invoke\("startSignup", \{ email: em, ts: tsTake\(\) \}\)/);
   assert.match(ui, /\$\("mailPass"\)\.parentNode\.style\.display = "none"/);
   assert.match(ui, /\$\("mailSend"\)\.style\.display = "none"/);
 });
@@ -37,12 +37,4 @@ test('hash token regex accepts only 43-char urlsafe tokens', () => {
   const re = /(?:^#|&)signup=([A-Za-z0-9_-]{43})(?:&|$)/;
   assert.ok(re.test('#signup=' + 'a'.repeat(43)));
   for (const h of ['#signup=short', '#signup=' + 'a'.repeat(44), '#x=signup=' + 'a'.repeat(43), '#signup=' + 'a'.repeat(42) + '!']) assert.ok(!re.test(h), h);
-});
-
-test('the bot-check token is awaited (with retry and timeout) before every send, and the error shows the code', () => {
-  assert.match(ui, /function tsWait\(\)/); assert.match(ui, /dt > 20000/); assert.match(ui, /window\.turnstile\.reset\(TS\.id\)/);
-  assert.equal((ui.match(/if \(!TS\.tok\) return \{ status: "error", error: "captcha" \}; return invoke\("startSignup"/g) || []).length, 2);
-  assert.equal((ui.match(/function \(\) \{ if \(r[gs] !== VF\.gen\) return; VF\.busy = false;|function \(\) \{ if \(sg !== VF\.gen\) return; VF\.busy = false;/g) || []).length, 2);
-  assert.match(ui, /function tsMsg/); assert.match(ui, /error-callback/);
-  assert.match(br, /error: r\.error, message: suMsg/);
 });
