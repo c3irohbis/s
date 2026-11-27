@@ -167,3 +167,15 @@ test('quota ledger is separate from the token table (SQL)', () => {
 test('Turnstile hostname must match exactly (missing or different is rejected)', async () => {
   for (const t of ['nohost', 'otherhost']) { const x = await run('/v1/signup/start', { email: 'a@b.com', ts: t }); assert.equal(x.status, 400); assert.equal(x.log.rpc.length, 0); }
 });
+
+test('mail is multipart plain+html with transactional headers, visible matching link, escaped address', async () => {
+  const mod = await import('../worker/signup-routes.js');
+  const link = 'https://c3irohbis.github.io/s/#signup=' + 'A'.repeat(43);
+  const m = mod.buildMessage('a+b@example.com', link, 'cairohbis@gmail.com');
+  assert.match(m, /^Reply-To: cairohbis@gmail\.com$/m); assert.match(m, /^Auto-Submitted: auto-generated$/m); assert.match(m, /^Content-Language: ar$/m);
+  assert.match(m, /multipart\/alternative/); assert.equal((m.match(/Content-Type: text\/(plain|html)/g) || []).length, 2);
+  const parts = m.split(/--b_[A-Za-z0-9_-]+/).slice(1, 3).map(p => Buffer.from(p.split('base64\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString());
+  assert.ok(parts[0].includes(link) && parts[0].includes('a+b@example.com'));
+  assert.ok(parts[1].split(link).length - 1 >= 3);   // button href, visible text, href of visible link
+  assert.doesNotMatch(parts[1], /<img|track|pixel/i);
+});

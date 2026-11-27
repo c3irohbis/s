@@ -1,0 +1,889 @@
+/* ==========================================================================
+   واجهة الدخول وإنشاء الحساب — المنطق (js/auth-ui.js)
+   يحلّ بالكامل محل واجهة الدخول القديمة + js/lamp-login.js.
+   الربط مع Firebase يتم في js/auth-bridge.js عبر window.AuthBridge.
+   ========================================================================== */
+(function () {
+(function() {
+  var scene    = document.getElementById('lpScene');
+  var cord     = document.getElementById('lpCord');
+  var lampWrap = document.getElementById('lpLampWrap');
+  var hint     = document.getElementById('lpHint');
+  var isOn     = false;
+  var busy     = false;
+
+  function toggle() {
+    if (busy) return;
+    busy = true;
+
+    /* 1 — اهتزاز الحبل */
+    cord.classList.add('pulled');
+    setTimeout(function() { cord.classList.remove('pulled'); }, 220);
+
+    /* 2 — رجّة المصباح */
+    lampWrap.style.animation = 'none';
+    lampWrap.style.transform = 'rotate(-5deg)';
+    setTimeout(function() {
+      lampWrap.style.transform = 'rotate(4deg)';
+      setTimeout(function() {
+        lampWrap.style.transform = '';
+        lampWrap.style.animation = '';
+      }, 110);
+    }, 110);
+
+    /* 3 — تشغيل / إطفاء */
+    setTimeout(function() {
+      isOn = !isOn;
+      scene.classList.toggle('on', isOn);
+      hint.textContent = isOn ? 'طفي الأباجورة' : 'دوس ع الأباجورة';
+      busy = false;
+    }, 200);
+  }
+
+  cord.addEventListener('click', function(e) { e.stopPropagation(); toggle(); });
+  lampWrap.addEventListener('click', toggle);
+})();
+
+;
+function _maleSVG(size) {
+  // Premium Male Avatar — Deep blue theme with gold accent
+  return `<svg width="${size}" height="${size}" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg" style="border-radius:50%;display:block;">
+    <defs>
+      <radialGradient id="mgBg${size}" cx="40%" cy="35%" r="65%">
+        <stop offset="0%" stop-color="#0f2044"/>
+        <stop offset="100%" stop-color="#060d1a"/>
+      </radialGradient>
+      <radialGradient id="mgSkin${size}" cx="45%" cy="35%" r="60%">
+        <stop offset="0%" stop-color="#e8c97a"/>
+        <stop offset="100%" stop-color="#c9a557"/>
+      </radialGradient>
+      <linearGradient id="mgShirt${size}" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#1d4ed8"/>
+        <stop offset="100%" stop-color="#1e3a8a"/>
+      </linearGradient>
+      <radialGradient id="mgGlow${size}" cx="50%" cy="45%" r="50%">
+        <stop offset="0%" stop-color="rgba(59,130,246,0.18)"/>
+        <stop offset="100%" stop-color="transparent"/>
+      </radialGradient>
+    </defs>
+    <!-- Background -->
+    <circle cx="40" cy="40" r="40" fill="url(#mgBg${size})"/>
+    <circle cx="40" cy="40" r="40" fill="url(#mgGlow${size})"/>
+    <!-- Body / Shirt -->
+    <path d="M13 80 Q14 54 40 50 Q66 54 67 80Z" fill="url(#mgShirt${size})"/>
+    <!-- Collar & tie detail -->
+    <path d="M34 51 L40 56 L46 51 L42 51 L40 53 L38 51Z" fill="#93c5fd"/>
+    <path d="M38.5 53 L40 70 L41.5 53 L40 56Z" fill="#bfdbfe" opacity="0.6"/>
+    <!-- Neck -->
+    <rect x="35" y="43" width="10" height="10" rx="4" fill="url(#mgSkin${size})"/>
+    <!-- Head -->
+    <ellipse cx="40" cy="30" rx="14" ry="15" fill="url(#mgSkin${size})"/>
+    <!-- Hair — short masculine -->
+    <path d="M26 29 Q26 14 40 13 Q54 14 54 29 Q52 20 40 19 Q28 20 26 29Z" fill="#2d1810"/>
+    <!-- Ear left -->
+    <ellipse cx="26.5" cy="30" rx="2" ry="3" fill="#c9a557"/>
+    <!-- Ear right -->
+    <ellipse cx="53.5" cy="30" rx="2" ry="3" fill="#c9a557"/>
+    <!-- Eye Left -->
+    <ellipse cx="34.5" cy="29" rx="2.2" ry="2" fill="#1a0e00"/>
+    <circle cx="35" cy="28.5" r=".7" fill="white" opacity=".5"/>
+    <!-- Eye Right -->
+    <ellipse cx="45.5" cy="29" rx="2.2" ry="2" fill="#1a0e00"/>
+    <circle cx="46" cy="28.5" r=".7" fill="white" opacity=".5"/>
+    <!-- Eyebrows -->
+    <path d="M32 26 Q34.5 24.8 37 26" stroke="#2d1810" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+    <path d="M43 26 Q45.5 24.8 48 26" stroke="#2d1810" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+    <!-- Nose -->
+    <path d="M39 31 Q38.5 35 39.5 36 Q40.5 36 41.5 35 Q42.5 34 40 31" stroke="#b8883d" stroke-width=".8" fill="none" opacity=".6"/>
+    <!-- Smile -->
+    <path d="M35.5 38 Q40 41.5 44.5 38" stroke="#8b5e24" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+    <!-- Cheek blush -->
+    <circle cx="30" cy="35" r="3.5" fill="rgba(255,200,100,0.15)"/>
+    <circle cx="50" cy="35" r="3.5" fill="rgba(255,200,100,0.15)"/>
+  </svg>`;
+}
+
+function _femaleSVG(size) {
+  // Premium Female Avatar — Rose-navy theme with warm pink accent
+  return `<svg width="${size}" height="${size}" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg" style="border-radius:50%;display:block;">
+    <defs>
+      <radialGradient id="fgBg${size}" cx="40%" cy="35%" r="65%">
+        <stop offset="0%" stop-color="#1a0a2e"/>
+        <stop offset="100%" stop-color="#0d0618"/>
+      </radialGradient>
+      <radialGradient id="fgSkin${size}" cx="45%" cy="35%" r="60%">
+        <stop offset="0%" stop-color="#f0c987"/>
+        <stop offset="100%" stop-color="#d4a055"/>
+      </radialGradient>
+      <linearGradient id="fgShirt${size}" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#be185d"/>
+        <stop offset="100%" stop-color="#831843"/>
+      </linearGradient>
+      <radialGradient id="fgGlow${size}" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="rgba(236,72,153,0.14)"/>
+        <stop offset="100%" stop-color="transparent"/>
+      </radialGradient>
+      <radialGradient id="fgHair${size}" cx="50%" cy="20%" r="70%">
+        <stop offset="0%" stop-color="#3d1a1a"/>
+        <stop offset="100%" stop-color="#1a0a0a"/>
+      </radialGradient>
+    </defs>
+    <!-- Background -->
+    <circle cx="40" cy="40" r="40" fill="url(#fgBg${size})"/>
+    <circle cx="40" cy="40" r="40" fill="url(#fgGlow${size})"/>
+    <!-- Body -->
+    <path d="M11 80 Q13 52 40 49 Q67 52 69 80Z" fill="url(#fgShirt${size})"/>
+    <!-- Neckline detail -->
+    <path d="M33 50 Q40 53 47 50 Q43 55 40 55 Q37 55 33 50Z" fill="#fb7185" opacity=".6"/>
+    <!-- Neck -->
+    <rect x="35.5" y="43" width="9" height="9" rx="4" fill="url(#fgSkin${size})"/>
+    <!-- Long hair behind (back layer) -->
+    <path d="M22 30 Q21 48 26 62 Q30 70 35 72 Q38 73 40 73 Q42 73 45 72 Q50 70 54 62 Q59 48 58 30 Q55 40 40 41 Q25 40 22 30Z" fill="url(#fgHair${size})"/>
+    <!-- Head -->
+    <ellipse cx="40" cy="28" rx="13.5" ry="14.5" fill="url(#fgSkin${size})"/>
+    <!-- Hair top -->
+    <path d="M27 27 Q27 13 40 12 Q53 13 53 27 Q51 18 40 17 Q29 18 27 27Z" fill="url(#fgHair${size})"/>
+    <!-- Hair side sweeps -->
+    <path d="M26.5 25 Q24 30 25 38 Q27 26 29 24Z" fill="url(#fgHair${size})"/>
+    <path d="M53.5 25 Q56 30 55 38 Q53 26 51 24Z" fill="url(#fgHair${size})"/>
+    <!-- Small curls / fringe -->
+    <path d="M28 20 Q30 15 33 17" stroke="#3d1a1a" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M47 17 Q50 15 52 20" stroke="#3d1a1a" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <!-- Ears -->
+    <ellipse cx="26.5" cy="28.5" rx="2.2" ry="2.8" fill="#d4a055"/>
+    <ellipse cx="53.5" cy="28.5" rx="2.2" ry="2.8" fill="#d4a055"/>
+    <!-- Ear rings -->
+    <circle cx="26.5" cy="31" r="1.2" fill="#f9a8d4" opacity=".9"/>
+    <circle cx="53.5" cy="31" r="1.2" fill="#f9a8d4" opacity=".9"/>
+    <!-- Eye Left -->
+    <ellipse cx="34" cy="27.5" rx="2.5" ry="2.2" fill="#1a0e00"/>
+    <circle cx="34.6" cy="27" r=".8" fill="white" opacity=".5"/>
+    <!-- Eye Right -->
+    <ellipse cx="46" cy="27.5" rx="2.5" ry="2.2" fill="#1a0e00"/>
+    <circle cx="46.6" cy="27" r=".8" fill="white" opacity=".5"/>
+    <!-- Lashes upper left -->
+    <path d="M31.5 25.5 Q34 24 36.5 25.5" stroke="#1a0e00" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+    <!-- Lashes upper right -->
+    <path d="M43.5 25.5 Q46 24 48.5 25.5" stroke="#1a0e00" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+    <!-- Eyebrow Left (arched) -->
+    <path d="M31 23.5 Q34 21.5 37 23.5" stroke="#3d1a1a" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+    <!-- Eyebrow Right (arched) -->
+    <path d="M43 23.5 Q46 21.5 49 23.5" stroke="#3d1a1a" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+    <!-- Nose -->
+    <path d="M39 31 Q38.5 34 39.5 35 Q40.5 35.2 41.5 34 Q42.5 33 40 31" stroke="#b8883d" stroke-width=".8" fill="none" opacity=".5"/>
+    <!-- Smile with lipstick -->
+    <path d="M35.5 37.5 Q40 41 44.5 37.5" stroke="#c2185b" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+    <path d="M35.5 37.5 Q40 38.5 44.5 37.5" stroke="#e91e8c" stroke-width=".6" fill="none" opacity=".4"/>
+    <!-- Cheek blush -->
+    <ellipse cx="29" cy="33" rx="4" ry="2.5" fill="rgba(236,72,153,0.2)"/>
+    <ellipse cx="51" cy="33" rx="4" ry="2.5" fill="rgba(236,72,153,0.2)"/>
+  </svg>`;
+}
+/* منطق واجهة الدخول وإنشاء الحساب — الربط مع Firebase عبر window.AuthBridge (التفاصيل أدناه) */
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+
+  var SV = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+  var ICON_ALERT = '<svg ' + SV + ' width="16" height="16"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/></svg>';
+  var ICON_OK = '<svg ' + SV + ' width="16" height="16"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>';
+  var ICON_EYE = '<svg ' + SV + '><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var ICON_EYE_OFF = '<svg ' + SV + '><path d="M3 3l18 18M10.6 6.2A9.7 9.7 0 0112 6c6.4 0 10 6 10 6a17 17 0 01-3.2 3.9M6.5 7.6C3.9 9.4 2 12 2 12s3.6 7 10 7c1.6 0 3-.4 4.3-1M9.9 10a3 3 0 004.1 4.1"/></svg>';
+  var ICON_USER = '<svg ' + SV + ' width="13" height="13" style="color:var(--gold)"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3"/><path d="M6.5 18c1.5-3 9.5-3 11 0"/></svg>';
+
+  /* ══ أدوات واجهة ══ */
+  function setAlert(id, msg, kind) {
+    var el = $(id); if (!el) return;
+    var ok = kind === "ok";
+    el.className = "av-alert" + (ok ? " ok" : "");
+    el.setAttribute("role", ok ? "status" : "alert");
+    el.innerHTML = (ok ? ICON_OK : ICON_ALERT) + '<span class="av-alert-msg"></span>';
+    el.querySelector(".av-alert-msg").textContent = msg;
+    el.hidden = false;
+  }
+  function clearAlert(id) { var el = $(id); if (el) { el.hidden = true; el.innerHTML = ""; } }
+  function markInvalid() { for (var i = 0; i < arguments.length; i++) { var e = $(arguments[i]); if (e) e.classList.add("is-invalid"); } }
+  function clearInvalid() { document.querySelectorAll(".is-invalid").forEach(function (e) { e.classList.remove("is-invalid"); }); }
+
+  /* ══ قوائم مخصصة للشعبة والفرقة (بدل قائمة المتصفح) ══ */
+  function enhanceSelects() {
+    var sheet = document.createElement("div"); sheet.className = "av-sheet"; sheet.hidden = true;
+    sheet.innerHTML = '<div class="av-sheet-bd"></div><div class="av-sheet-panel" role="dialog" aria-modal="true"><div class="av-sheet-grip"></div><div class="av-sheet-title"></div><div class="av-sheet-list" role="listbox"></div></div>';
+    document.body.appendChild(sheet);
+    var list = sheet.querySelector(".av-sheet-list"), ttl = sheet.querySelector(".av-sheet-title"), cur = null, tmr = null;
+    var vd = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+    function close() {
+      if (!cur) return; var b = cur.btn; cur = null; b.setAttribute("aria-expanded", "false");
+      sheet.classList.remove("open"); clearTimeout(tmr); tmr = setTimeout(function () { if (!sheet.classList.contains("open")) sheet.hidden = true; }, 240); b.focus();
+    }
+    function open(o) {
+      cur = o; ttl.textContent = o.title; list.innerHTML = "";
+      o.items.forEach(function (it) {
+        var on = it.value === vd.get.call(o.sel), b = document.createElement("button");
+        b.type = "button"; b.className = "av-opt" + (on ? " on" : ""); b.setAttribute("role", "option"); b.setAttribute("aria-selected", on ? "true" : "false");
+        b.innerHTML = '<span class="av-opt-t"></span><span class="av-opt-ck" aria-hidden="true"></span>'; b.firstChild.textContent = it.text;
+        b.addEventListener("click", function () { o.sel.value = it.value; o.sel.dispatchEvent(new Event("input", { bubbles: true })); o.sel.dispatchEvent(new Event("change", { bubbles: true })); close(); });
+        list.appendChild(b);
+      });
+      clearTimeout(tmr); sheet.hidden = false; o.btn.setAttribute("aria-expanded", "true");
+      requestAnimationFrame(function () { sheet.classList.add("open"); var on = list.querySelector(".on") || list.firstChild; if (on) on.focus({ preventScroll: true }); });
+    }
+    sheet.querySelector(".av-sheet-bd").addEventListener("click", close);
+    document.addEventListener("keydown", function (e) {
+      if (!cur) return;
+      if (e.key === "Escape") { e.preventDefault(); close(); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); var bs = [].slice.call(list.children), i = bs.indexOf(document.activeElement); bs[Math.max(0, Math.min(bs.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))].focus(); }
+    });
+    ["regDept", "regYear", "cpDept", "cpYear"].forEach(function (id) {
+      var sel = $(id); if (!sel) return;
+      var items = [].slice.call(sel.options).filter(function (op) { return op.value; }).map(function (op) { return { value: op.value, text: op.textContent.trim() }; });
+      var ph = sel.options[0] ? sel.options[0].textContent.trim() : "";
+      var wrap = document.createElement("div"); wrap.className = "av-sel-wrap"; sel.parentNode.insertBefore(wrap, sel);
+      var btn = document.createElement("button"); btn.type = "button"; btn.className = "inp av-sel"; btn.setAttribute("aria-haspopup", "listbox"); btn.setAttribute("aria-expanded", "false");
+      btn.innerHTML = '<span class="av-sel-t"></span><span class="av-sel-ch" aria-hidden="true"></span>';
+      wrap.appendChild(btn); wrap.appendChild(sel); sel.classList.add("av-native"); sel.tabIndex = -1; sel.setAttribute("aria-hidden", "true");
+      var o = { sel: sel, btn: btn, items: items, title: "اختر " + ph };
+      function sync() { var v = vd.get.call(sel), it = items.filter(function (x) { return x.value === v; })[0]; btn.firstChild.textContent = it ? it.text : ph; btn.classList.toggle("has", !!it); }
+      Object.defineProperty(sel, "value", { get: function () { return vd.get.call(this); }, set: function (v) { vd.set.call(this, v); sync(); }, configurable: true });
+      sel.addEventListener("change", sync);
+      new MutationObserver(function () { btn.classList.toggle("is-invalid", sel.classList.contains("is-invalid")); }).observe(sel, { attributes: true, attributeFilter: ["class"] });
+      btn.addEventListener("click", function () { open(o); });
+      sync();
+    });
+  }
+  var EMAIL_RE = /^\S+@\S+\.\S+$/;
+
+  /* ══════════════════════════════════════════════════════════════════════
+     ربط نظام المصادقة — كل ما يخص Firebase يُنفَّذ داخل window.AuthBridge
+     عرّفه في موقعك قبل هذا السكربت. كل دالة ترجع Promise (أو قيمة مباشرة):
+       loginEmail({email, password})   → {status:"ok"|"incomplete"|"error", profile?, message?}
+       google(draft | null)            → {status:"ok"|"incomplete"|"cancelled"|"error", profile?, message?}
+                                         (draft = بيانات التسجيل عند الإنشاء، و null عند تسجيل الدخول)
+       sendEmailLink({email, password, profile}) → {status:"sent"|"exists"|"error", message?}
+       resendEmailLink({email})        → {status:"sent"|"error", message?}
+       checkEmailVerified({email})     → {status:"verified"|"pending"|"error", profile?, message?}
+       saveProfile(profile)            → {status:"ok"|"error", message?}
+       onDone(profile)  [اختياري]      → الانتقال للصفحة الرئيسية بعد النجاح
+       signOut()        [اختياري]
+     profile = {name, gender:"male"|"female", dept, year, terms}
+     ويمكن لموقعك استدعاء AuthUI.emailVerified(profile) عند اكتشاف التحقق خارج هذه الصفحة.
+     ══════════════════════════════════════════════════════════════════════ */
+  var NOT_CONNECTED = "لم يتم ربط نظام المصادقة بعد.";
+  var bridge = window.AuthBridge = window.AuthBridge || {};
+  ["loginEmail", "google", "sendEmailLink", "resendEmailLink", "checkEmailVerified", "sendVerification", "pollVerified", "cancelVerification", "saveProfile", "resetPassword", "checkResetCode", "confirmReset", "applyVerify", "startSignup", "peekSignup", "completeSignup"].forEach(function (m) {
+    if (typeof bridge[m] !== "function") bridge[m] = function () { return { status: "error", message: NOT_CONNECTED }; };
+  });
+  var bridgeReady = new Promise(function (res) { window.__resolveAuthBridge = res; });
+  function invoke(method, payload) {
+    var wait = Promise.race([bridgeReady, new Promise(function (res) { setTimeout(res, 8000); })]);
+    var p = wait.then(function () { return bridge[method](payload); });
+    return p.then(function (r) { return r || { status: "error" }; }, function (e) { return { status: "error", message: (e && e.message) || "" }; });
+  }
+  /* بدون شاشة تحميل؛ ونتجاهل الضغطات المتكررة أثناء تنفيذ طلب جارٍ */
+  var inflight = false;
+  function call(method, payload) {
+    if (inflight) return new Promise(function () {});
+    inflight = true;
+    return invoke(method, payload).then(function (r) { inflight = false; return r; }, function (e) { inflight = false; throw e; });
+  }
+
+  /* حالة الواجهة فقط (مسودة التسجيل + تحقق البريد المعلّق) — تبقى بعد إغلاق الصفحة */
+  var KEY = "bis_auth_ui", S = { draft: null, pending: null }, profile = null, pendingMethod = null;
+  try { var raw = JSON.parse(localStorage.getItem(KEY)); if (raw) S = { draft: raw.draft || null, pending: raw.pending || null }; } catch (e) {}
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+  function readDraft() { S.draft = { name: $("loginName").value.trim(), gender: gender.reg.get(), dept: $("regDept").value, year: $("regYear").value, terms: $("agreeTermsCheck").checked }; save(); }
+  function regComplete() { return !!($("loginName").value.trim() && gender.reg && gender.reg.get() && $("regDept").value && $("regYear").value && $("agreeTermsCheck").checked); }
+  function syncMethods() {
+    if (!gender.reg) return;
+    var ok = regComplete();
+    ["methodGoogle", "methodMail"].forEach(function (id) { var b = $(id); if (!b) return; b.classList.toggle("av-incomplete", !ok); b.setAttribute("aria-disabled", String(!ok)); });
+    var al = $("regAlert"); if (ok && al && al.dataset.inc) { delete al.dataset.inc; clearAlert("regAlert"); }
+  }
+  function restoreDraft() { var d = S.draft; if (!d) return; $("loginName").value = d.name || ""; if (d.gender) gender.reg.set(d.gender); $("regDept").value = d.dept || ""; $("regYear").value = d.year || ""; $("agreeTermsCheck").checked = !!d.terms; }
+  function prefillComplete() { var u = profile; if (!u) return; $("cpName").value = u.name || ""; if (u.gender) gender.cp.set(u.gender); $("cpDept").value = u.dept || ""; $("cpYear").value = u.year || ""; $("cpTerms").checked = !!u.terms; }
+  function openVerify() { openScreen("Verify"); if (S.pending) $("verifyEmail").textContent = S.pending.email; var r = S.pending ? Math.ceil((S.pending.cdEnd - Date.now()) / 1000) : 0; startCooldown(r > 0 ? r : 0); }
+  /* دخول ناجح: فتح الموقع مباشرة بدون شاشة نجاح */
+  function finish() { if (typeof bridge.onDone === "function") bridge.onDone(profile); else go("login"); }
+  function afterAuth(r, onFail) {
+    if (r.status === "ok") { profile = r.profile || profile; S.draft = null; save(); return finish(); }
+    if (r.status === "incomplete") { profile = r.profile || {}; return go("complete"); }
+    onFail(r);
+  }
+  function fail(view, alertId, r, fields) {
+    go(view);
+    if (r.status === "cancelled") return;
+    setAlert(alertId, r.message || "حدث خطأ، حاول مرة أخرى."); if (fields) markInvalid.apply(null, fields);
+  }
+
+  function inAuth(t) { return !!(t && t.closest && t.closest("#page-login, .av-screen")); }
+  document.addEventListener("input", function (e) { if (inAuth(e.target)) e.target.classList.remove("is-invalid"); });
+  document.addEventListener("change", function (e) { if (inAuth(e.target)) e.target.classList.remove("is-invalid"); });
+
+  /* زر إظهار/إخفاء كلمة المرور */
+  function wireEyes() {
+    document.querySelectorAll(".av-eye").forEach(function (b) {
+      b.innerHTML = ICON_EYE;
+      b.addEventListener("click", function () {
+        var inp = $(b.getAttribute("data-eye")); if (!inp) return;
+        var show = inp.type === "password";
+        inp.type = show ? "text" : "password";
+        b.innerHTML = show ? ICON_EYE_OFF : ICON_EYE;
+        b.setAttribute("aria-pressed", String(show));
+        b.setAttribute("aria-label", show ? "إخفاء كلمة المرور" : "إظهار كلمة المرور");
+      });
+    });
+  }
+
+  /* SVG الأفاتار فيها ids (gradients/clipPath) — لازم تكون فريدة لكل نسخة، وإلا النسخة المخفية (display:none) بتكسر الباقي */
+  function uniq(svg, sfx) {
+    var ids = []; svg.replace(/id="([^"]+)"/g, function (m, id) { ids.push(id); return m; });
+    ids.forEach(function (id) {
+      var re = new RegExp('id="' + id + '"', "g"); svg = svg.replace(re, 'id="' + id + '-' + sfx + '"');
+      svg = svg.split("url(#" + id + ")").join("url(#" + id + "-" + sfx + ")");
+      svg = svg.split('href="#' + id + '"').join('href="#' + id + '-' + sfx + '"');
+    });
+    return svg;
+  }
+
+  /* اختيار النوع (نفس classes الأصل: gender-seg-*) */
+  function makeGender(host, blank) {
+    host.innerHTML =
+      '<div class="gender-seg-header">' + ICON_USER + ' نوع الحساب</div>' +
+      '<div class="gender-seg-track"><div class="gender-seg-thumb male-active"></div>' +
+      '<button type="button" class="gender-seg-opt active-male" data-g="male"><div class="gender-avatar-preview">' + uniq(_maleSVG(36), host.id) + '</div><div><div class="gender-type-label">طالب</div><div class="av-en">Male</div></div></button>' +
+      '<button type="button" class="gender-seg-opt" data-g="female"><div class="gender-avatar-preview">' + uniq(_femaleSVG(36), host.id) + '</div><div><div class="gender-type-label">طالبة</div><div class="av-en">Female</div></div></button></div>';
+    var thumb = host.querySelector(".gender-seg-thumb"), m = host.querySelector('[data-g="male"]'), f = host.querySelector('[data-g="female"]'), cur = blank ? null : "male";
+    var mid = document.createElement("div"); mid.setAttribute("aria-hidden", "true"); host.querySelector(".gender-seg-track").appendChild(mid);
+    function paint(g) { if (!g) { mid.className = "gender-mid none"; mid.innerHTML = ""; return; } mid.className = "gender-mid " + g; mid.innerHTML = uniq(g === "male" ? _maleSVG(44) : _femaleSVG(44), host.id + "mid"); }
+    paint(blank ? null : "male");
+    if (blank) { m.className = "gender-seg-opt"; thumb.className = "gender-seg-thumb none"; }
+    function set(g) {
+      cur = g; paint(g); host.classList.remove("is-invalid");
+      m.className = "gender-seg-opt" + (g === "male" ? " active-male" : "");
+      f.className = "gender-seg-opt" + (g === "female" ? " active-female" : "");
+      thumb.className = "gender-seg-thumb " + (g === "male" ? "male-active" : "female-active");
+    }
+    m.onclick = function () { set("male"); }; f.onclick = function () { set("female"); };
+    return { set: set, get: function () { return cur; } };
+  }
+
+  /* ══ المصباح ══ */
+  function lampIsOn() { return $("lpScene").classList.contains("on"); }
+  function ensureLamp(on) { if (lampIsOn() !== !!on) $("lpCord").click(); }
+
+  /* ══ العروض والشاشات ══ */
+  function setView(v) {
+    var box = v === "login" ? "login" : "register";
+    $("lpBox").dataset.view = box; $("lpScene").dataset.view = box;
+    ["Login", "Register"].forEach(function (n) { $("view" + n).hidden = v !== n.toLowerCase(); });
+    clearAlert("loginAlert"); clearAlert("regAlert"); clearAlert("mailAlert"); clearInvalid(); syncMethods();
+  }
+  function closeScreens() {
+    document.querySelectorAll(".av-screen").forEach(function (s) { s.hidden = true; });
+    document.body.classList.remove("av-screen-open");
+    clearAlert("cpAlert"); clearAlert("verifyAlert"); clearAlert("rpAlert");
+    var em = $("existsModal"); if (em) em.hidden = true;
+  }
+  function showExists() { var m = $("existsModal"); if (!m) return; m.hidden = false; $("existsLogin").focus(); }
+  function openScreen(name) {
+    closeScreens();
+    document.body.classList.add("av-screen-open");
+    var s = $("screen" + name); s.hidden = false; s.scrollTop = 0;
+  }
+
+  /* لا توجد شاشة تحميل: الواجهة تبقى ظاهرة أثناء الطلب (دوال فارغة تحافظ على استدعاءات go) */
+  function stopSplash() {}
+  function removeLoading() {}
+
+  /* ══ تأكيد البريد: cooldown ══ */
+  var CD_TOTAL = 45, cd = 0, cdTimer = null;
+  function fmt(s) { var m = Math.floor(s / 60), r = s % 60; return m + ":" + (r < 10 ? "0" : "") + r; }
+  function renderCd() {
+    var on = cd > 0, b = $("resendBtn");
+    b.disabled = on; b.setAttribute("aria-disabled", String(on));
+    $("cdNote").hidden = !on;
+    if (on) { $("cdTime").textContent = fmt(cd); $("cdBar").style.width = (cd / CD_TOTAL * 100) + "%"; }
+  }
+  function startCooldown(sec) {
+    cd = sec; renderCd(); clearInterval(cdTimer);
+    cdTimer = setInterval(function () { cd--; renderCd(); if (cd <= 0) { clearInterval(cdTimer); cdTimer = null; } }, 1000);
+  }
+  function stopCooldown() { clearInterval(cdTimer); cdTimer = null; }
+
+  /* ══ استعادة كلمة المرور (البريد ← رابط التحقق ← كلمة مرور جديدة) ══ */
+  /* إيقاف مؤقت: اجعلها true لإعادة تشغيل الميزة */
+  var FORGOT_ENABLED = false;
+  var FORGOT_OFF_MSG = "هذه الإضافة لا تعمل لدواعي أمنية";
+  var fpCdEnd = 0, fpTimer = null, rpCode = null, rpEmail = "";
+  function renderFp() {
+    var b = $("fpSend"), left = Math.ceil((fpCdEnd - Date.now()) / 1000);
+    if (left > 0) { b.disabled = true; b.textContent = "إعادة الإرسال بعد " + fmt(left); }
+    else { clearInterval(fpTimer); fpTimer = null; b.disabled = false; b.textContent = "إرسال رابط التحقق"; }
+  }
+  function startFp(sec) { fpCdEnd = Date.now() + sec * 1000; renderFp(); clearInterval(fpTimer); fpTimer = setInterval(renderFp, 1000); }
+  function endReset() { rpCode = null; try { if (typeof bridge.endReset === "function") bridge.endReset(); } catch (e) {} }
+  /* الصفحة فُتحت من رابط الاستعادة المرسل للبريد */
+  function resetLink() {
+    try {
+      var hm = /(?:^#|&)signup=([A-Za-z0-9_-]{43})(?:&|$)/.exec(location.hash || "");
+      if (hm) {
+        if (window.history && history.replaceState) history.replaceState(null, "", location.pathname + location.search);
+        return { mode: "signup", code: hm[1] };
+      }
+      var q = new URLSearchParams(location.search), mode = q.get("mode"), code = q.get("oobCode");
+      if ((mode !== "resetPassword" && mode !== "verifyEmail") || !code) return null;
+      if (window.history && history.replaceState) history.replaceState(null, "", location.pathname + location.hash);
+      return { mode: mode, code: code };
+    } catch (e) { return null; }
+  }
+  /* رابط تأكيد البريد المرسل في الرسالة */
+  function startVerifyLink(code) {
+    call("applyVerify", { code: code }, "جارٍ تأكيد بريدك الإلكتروني…").then(function (r) {
+      endReset(); go("login");
+      if (r.status === "ok") { S.pending = null; save(); setAlert("loginAlert", "تم تأكيد بريدك الإلكتروني بنجاح. سجّل دخولك الآن.", "ok"); }
+      else setAlert("loginAlert", r.message || "رابط التأكيد غير صالح أو انتهت صلاحيته.");
+    });
+  }
+  /* رابط إنشاء الحساب من البريد: لا حساب Auth قبل هذه الخطوة. الباسورد يُحدَّد هنا فقط */
+  var suToken = null;
+  function setResetMode(signup) {
+    var h = document.querySelector("#screenReset .av-h1"), sub = document.querySelector("#screenReset .av-sub");
+    if (h) h.textContent = signup ? "اختر كلمة المرور" : "كلمة مرور جديدة";
+    if (sub) sub.textContent = signup ? "تم التحقق من بريدك. اختر كلمة مرور لإكمال إنشاء حسابك." : "تم التحقق من بريدك. اختر كلمة مرور جديدة.";
+    $("rpSave").textContent = signup ? "إنشاء الحساب" : "حفظ كلمة المرور";
+  }
+  function startSignupLink(token) {
+    call("peekSignup", { token: token }, "جارٍ التحقق من الرابط…").then(function (r) {
+      if (r.status === "ok") { suToken = token; rpCode = null; rpEmail = r.email || ""; setResetMode(true); return go("reset"); }
+      suToken = null; endReset(); go("login");
+      setAlert("loginAlert", r.message || "الرابط غير صالح أو انتهت صلاحيته. اطلب رابطًا جديدًا من شاشة إنشاء الحساب.");
+    });
+  }
+  function startReset(code) {
+    setResetMode(false); suToken = null;
+    if (!FORGOT_ENABLED) { go("login"); setAlert("loginAlert", FORGOT_OFF_MSG); return; }
+    rpCode = code; rpEmail = ""; $("rpPass").value = ""; $("rpPass2").value = "";
+    call("checkResetCode", { code: code }, "جارٍ التحقق من الرابط…").then(function (r) {
+      if (r.status === "ok") { rpEmail = r.email || ""; return go("reset"); }
+      endReset(); go("forgot");
+      setAlert("fpAlert", r.message || "الرابط غير صالح أو انتهت صلاحيته، اطلب رابطًا جديدًا.");
+    });
+  }
+
+  /* ══ التنقل بين الشاشات ══ */
+  var gender = {};
+  var SCREENS = {
+    "lamp-off": function () { setView("login"); ensureLamp(false); },
+    login: function () { setView("login"); ensureLamp(true); },
+    register: function () { setView("register"); ensureLamp(true); },
+    complete: function () { openScreen("Complete"); prefillComplete(); },
+    verify: openVerify,
+    forgot: function () { openScreen("Forgot"); clearAlert("fpAlert"); clearInvalid(); $("fpEmail").value = ""; renderFp(); },
+    reset: function () { openScreen("Reset"); $("rpEmail").textContent = rpEmail || ""; $("rpEmail").hidden = !rpEmail; }
+  };
+  function go(id, opts) {
+    var fn = SCREENS[id]; if (!fn) return;
+    removeLoading(); stopSplash(); stopCooldown(); closeScreens();
+    fn(opts || {});
+  }
+
+  /* يشغّل فحص نموذج التسجيل مباشرة (requestSubmit يتعطل داخل المعاينات المقيّدة) */
+  function submitReg() { $("regForm").dispatchEvent(new Event("submit", { cancelable: true, bubbles: true })); }
+
+  /* ══ ربط الأحداث ══ */
+  function wire() {
+    document.addEventListener("click", function (e) {
+      var g = e.target.closest && e.target.closest("[data-go]"); if (g) { e.preventDefault(); go(g.getAttribute("data-go")); }
+      var a = e.target.closest && e.target.closest("[data-noop]"); if (a) e.preventDefault();
+    });
+
+    $("loginForm").addEventListener("submit", function (e) {
+      e.preventDefault(); clearAlert("loginAlert"); clearInvalid();
+      var em = $("loginEmail").value.trim(), pw = $("loginPass").value;
+      if (!em || !pw) { setAlert("loginAlert", "اكتب البريد الإلكتروني وكلمة المرور."); if (!em) markInvalid("loginEmail"); if (!pw) markInvalid("loginPass"); return; }
+      if (!EMAIL_RE.test(em)) { setAlert("loginAlert", "صيغة البريد الإلكتروني غير صحيحة."); markInvalid("loginEmail"); return; }
+      call("loginEmail", { email: em, password: pw }, "جارٍ تسجيل الدخول…").then(function (r) {
+        afterAuth(r, function (x) { fail("login", "loginAlert", x, ["loginEmail", "loginPass"]); });
+      });
+    });
+    /* زر الدخول يشغّل الفحص مباشرة (إرسال النموذج يتعطل داخل المعاينات المقيّدة) */
+    $("mainAuthBtn").addEventListener("click", function (e) { e.preventDefault(); $("loginForm").dispatchEvent(new Event("submit", { cancelable: true, bubbles: true })); });
+    /* نسيت كلمة المرور: تصفير حقلَي الدخول ثم شاشة مستقلة فيها خانة البريد فقط */
+    $("forgotBtn").addEventListener("click", function () {
+      if (!FORGOT_ENABLED) { clearInvalid(); setAlert("loginAlert", FORGOT_OFF_MSG); return; }
+      $("loginEmail").value = ""; $("loginPass").value = ""; $("loginPass").type = "password";
+      var eb = document.querySelector('[data-eye="loginPass"]'); if (eb) { eb.innerHTML = ICON_EYE; eb.setAttribute("aria-pressed", "false"); }
+      go("forgot");
+    });
+    $("fpForm").addEventListener("submit", function (e) {
+      e.preventDefault(); clearAlert("fpAlert"); clearInvalid();
+      if (fpCdEnd > Date.now()) return;
+      var em = $("fpEmail").value.trim();
+      if (!em) { setAlert("fpAlert", "اكتب بريدك الإلكتروني."); markInvalid("fpEmail"); return; }
+      if (!EMAIL_RE.test(em)) { setAlert("fpAlert", "صيغة البريد الإلكتروني غير صحيحة."); markInvalid("fpEmail"); return; }
+      $("fpSend").disabled = true; $("fpSend").textContent = "جارٍ الإرسال…";
+      invoke("resetPassword", { email: em }).then(function (r) {
+        if (r.status === "sent") {
+          setAlert("fpAlert", "إذا كان هذا البريد مسجّلًا لدينا، أرسلنا إليه رابط التحقق. افتح الرسالة واضغط على الرابط (وافحص الرسائل غير المرغوبة).", "ok");
+          startFp(45);
+        } else {
+          fpCdEnd = 0; renderFp();
+          setAlert("fpAlert", r.message || "تعذّر إرسال الرابط، حاول مرة أخرى.");
+        }
+      });
+    });
+    $("fpSend").addEventListener("click", function (e) { e.preventDefault(); $("fpForm").dispatchEvent(new Event("submit", { cancelable: true, bubbles: true })); });
+    $("fpBack").addEventListener("click", function () { go("login"); });
+    $("rpForm").addEventListener("submit", function (e) {
+      e.preventDefault(); clearAlert("rpAlert"); clearInvalid();
+      var p1 = $("rpPass").value, p2 = $("rpPass2").value;
+      if (!p1) { setAlert("rpAlert", "اكتب كلمة المرور الجديدة."); markInvalid("rpPass"); return; }
+      if (p1.length < 6) { setAlert("rpAlert", "كلمة المرور يجب ألا تقل عن 6 أحرف."); markInvalid("rpPass"); return; }
+      if (p1 !== p2) { setAlert("rpAlert", "كلمتا المرور غير متطابقتين."); markInvalid("rpPass2"); return; }
+      if (suToken) {
+        var tk = suToken;
+        return call("completeSignup", { token: tk, password: p1 }, "جارٍ إنشاء حسابك…").then(function (r) {
+          if (r.status === "ok") {
+            suToken = null; $("rpPass").value = ""; $("rpPass2").value = "";
+            var em = r.email, nx = S.draft ? call("sendEmailLink", { email: em, profile: S.draft }, "جارٍ إنشاء حسابك…") : call("checkEmailVerified", { email: em }, "جارٍ إنشاء حسابك…");
+            return nx.then(function (x) {
+              if (x.status === "ok" || x.status === "verified") { profile = x.profile || profile; S.draft = null; S.pending = null; save(); return finish(); }
+              profile = x.profile || {}; go("complete");
+              if (x.status === "error") setAlert("cpAlert", x.message || "تعذّر حفظ بياناتك، حاول مرة أخرى.");
+            });
+          }
+          if (r.status === "invalid") { suToken = null; endReset(); go("login"); return setAlert("loginAlert", r.message || "الرابط غير صالح أو انتهت صلاحيته. اطلب رابطًا جديدًا."); }
+          if (r.status === "exists") { suToken = null; var ee = rpEmail; endReset(); go("login"); $("loginEmail").value = ee || ""; return setAlert("loginAlert", r.message || "هذا البريد مسجّل بالفعل. سجّل دخولك."); }
+          go("reset"); setAlert("rpAlert", r.message || "تعذّر إنشاء الحساب، حاول مرة أخرى.");
+        });
+      }
+      call("confirmReset", { code: rpCode, password: p1 }, "جارٍ حفظ كلمة المرور…").then(function (r) {
+        if (r.status === "ok") {
+          var em = rpEmail; endReset(); go("login");
+          $("loginEmail").value = em || ""; $("loginPass").value = "";
+          setAlert("loginAlert", "تم تغيير كلمة المرور بنجاح. سجّل دخولك بكلمة المرور الجديدة.", "ok");
+          return;
+        }
+        if (r.status === "expired") { endReset(); go("forgot"); setAlert("fpAlert", r.message); return; }
+        go("reset"); setAlert("rpAlert", r.message || "تعذّر حفظ كلمة المرور، حاول مرة أخرى.");
+      });
+    });
+    $("rpSave").addEventListener("click", function (e) { e.preventDefault(); $("rpForm").dispatchEvent(new Event("submit", { cancelable: true, bubbles: true })); });
+    $("rpBack").addEventListener("click", function () { suToken = null; endReset(); go("login"); });
+    $("googleBtn").addEventListener("click", function () {
+      call("google", null, "جارٍ الاتصال بحساب Google…").then(function (r) { afterAuth(r, function (x) { fail("login", "loginAlert", x); }); });
+    });
+
+    $("regForm").addEventListener("input", readDraft); $("regForm").addEventListener("change", readDraft); $("regGender").addEventListener("click", readDraft); ["input", "change"].forEach(function (ev) { $("regForm").addEventListener(ev, syncMethods); }); $("regGender").addEventListener("click", syncMethods);
+    $("methodGoogle").addEventListener("click", function () {
+      pendingMethod = function () {
+        call("google", S.draft, "جارٍ ربط بياناتك بحساب Google…").then(function (r) { afterAuth(r, function (x) { if (x.status === "exists") { go("register"); showExists(); } else fail("register", "regAlert", x); }); });
+      };
+      submitReg();
+    });
+    /* متصفح داخل تطبيق (واتساب/فيسبوك/إنستاجرام/تيليجرام…): Google يمنع تسجيل الدخول
+       داخل هذه المتصفحات، والتكملة في متصفح خارجي تترك هذا المتصفح بدون جلسة.
+       نمنع الزر ونوضح إن الموقع يُفتح في متصفح خارجي أولًا. */
+    var _ua = navigator.userAgent || "";
+    var IN_APP_UA = /(FBAN|FBAV|FB_IAB|Instagram|WhatsApp|Telegram|Line\/|Snapchat|TikTok|; wv\)| wv\/)/i.test(_ua)
+      || (/(iPhone|iPad|iPod)/i.test(_ua) && /AppleWebKit/i.test(_ua) && !/Safari/i.test(_ua));
+    if (IN_APP_UA) {
+      var inAppNote = "تسجيل Google لا يعمل من متصفح داخل تطبيق. افتح الموقع في Chrome أو Safari أولًا ثم سجّل دخولك.";
+      [["googleBtn", "loginAlert"], ["methodGoogle", "regAlert"]].forEach(function (pair) {
+        var b = $(pair[0]); if (!b) return;
+        b.addEventListener("click", function (e) {
+          e.preventDefault(); e.stopImmediatePropagation();
+          setAlert(pair[1], inAppNote);
+        }, true);
+      });
+    }
+
+    $("methodMail").addEventListener("click", function () {
+      if (!$("mailBox").hidden) {            /* ضغطة ثانية على البريد → إخفاء الحقول والرجوع للأصل */
+        $("mailBox").hidden = true; pendingMethod = null; if (window.__authVerifyReset) window.__authVerifyReset(true);
+        $("mailEmail").value = ""; $("mailPass").value = ""; $("mailPass").type = "password";
+        var eb = document.querySelector('[data-eye="mailPass"]'); if (eb) { eb.innerHTML = ICON_EYE; eb.setAttribute("aria-pressed", "false"); }
+        clearAlert("mailAlert"); $("mailEmail").classList.remove("is-invalid"); $("mailPass").classList.remove("is-invalid");
+        return;
+      }
+      pendingMethod = null;
+      if (!regComplete()) { submitReg(); return; }   /* بيانات ناقصة: ما نفتحش حقول البريد */
+      $("mailBox").hidden = false; submitReg(); $("mailEmail").focus();
+    });
+    ["mailEmail", "mailPass"].forEach(function (id) { $(id).addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); if (!$("mailSend").disabled) $("mailSend").click(); else $("mailVerify").click(); } }); });
+    /* ── تحقق البريد قبل إنشاء الحساب: زر بجوار البريد + فحص تلقائي للتفعيل ── */
+    var VF = { state: "idle", email: "", cd: 0, cdT: null, poll: null, until: 0, busy: false, gen: 0 };
+    var vBtn = document.createElement("button");
+    vBtn.type = "button"; vBtn.id = "mailVerify"; vBtn.className = "btn"; vBtn.textContent = "إرسال رابط التحقق";
+    vBtn.style.cssText = "flex:none;width:auto;min-width:0;white-space:nowrap;padding:0 14px;margin:0;font-size:13px";
+    var vField = $("mailEmail").parentNode;
+    vField.style.display = "flex"; vField.style.gap = "8px"; vField.style.alignItems = "stretch";
+    $("mailEmail").style.flex = "1 1 auto"; $("mailEmail").style.minWidth = "0";
+    vField.appendChild(vBtn);
+    $("mailSend").disabled = true; $("mailSend").style.display = "none";
+    $("mailPass").parentNode.style.display = "none";   /* لا كلمة مرور قبل التحقق: تُحدَّد بعد الضغط على الرابط */
+    /* حماية ضد الروبوتات (Cloudflare Turnstile): مفتاح الموقع عام بطبيعته */
+    var TS = { key: "0x4AAAAAAGVSc8X_-cQ3RZVl", tok: "", id: null, box: null, err: "" };
+    function tsEnsure() {
+      if (!window.turnstile || TS.id !== null) return;
+      try { TS.id = window.turnstile.render(TS.box, { sitekey: TS.key, appearance: "interaction-only", callback: function (t) { TS.tok = t; TS.err = ""; }, "expired-callback": function () { TS.tok = ""; }, "error-callback": function (c) { TS.tok = ""; TS.err = String(c || "error"); return true; } }); } catch (e) { TS.err = "render"; }
+    }
+    function tsInit() {
+      if (TS.box) return;
+      TS.box = document.createElement("div"); TS.box.style.cssText = "margin:6px 0;min-height:0";
+      vField.parentNode.insertBefore(TS.box, vField.nextSibling);
+      if (window.turnstile) return tsEnsure();
+      window.__tsReady = tsEnsure;
+      var sc = document.createElement("script"); sc.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=__tsReady"; sc.async = true; sc.defer = true;
+      sc.onerror = function () { TS.err = "script"; };
+      document.head.appendChild(sc);
+    }
+    /* ننتظر التوكن حتى 20 ثانية (يتجدد تلقائيًا)؛ لو تأخر نعيد رسم الودجت مرة */
+    function tsWait() {
+      return new Promise(function (resolve) {
+        var t0 = Date.now(), retried = false;
+        (function poll() {
+          tsEnsure();
+          if (TS.tok) return resolve(TS.tok);
+          var dt = Date.now() - t0;
+          if (!retried && dt > 6000 && window.turnstile && TS.id !== null) { retried = true; try { window.turnstile.reset(TS.id); } catch (_) {} }
+          if (dt > 20000 || (TS.err === "script" && dt > 3000)) return resolve("");
+          setTimeout(poll, 250);
+        })();
+      });
+    }
+    function tsTake() { var t = TS.tok; TS.tok = ""; if (window.turnstile && TS.id !== null) { try { window.turnstile.reset(TS.id); } catch (_) {} } return t; }
+    function tsMsg(r, fallback) { return r && r.error === "captcha" ? "تعذّر التحقق من أنك لست روبوتًا" + (TS.err ? " (" + TS.err + ")" : "") + ". أعد تحميل الصفحة وحاول مرة أخرى." : (r.message || fallback); }
+    tsInit();
+    function vRender() {
+      var st = VF.state, ro = st === "sending" || st === "sent" || st === "verified";
+      $("mailEmail").readOnly = ro; $("mailPass").readOnly = ro;
+      $("mailSend").disabled = st !== "verified"; $("mailSend").style.opacity = st === "verified" ? "" : ".5"; $("mailSend").style.cursor = st === "verified" ? "" : "not-allowed";
+      if (st === "verified") { vBtn.textContent = "تم التحقق ✓"; vBtn.disabled = true; }
+      else if (st === "sending") { vBtn.textContent = "جارٍ الإرسال…"; vBtn.disabled = true; }
+      else if (st === "sent") {
+        vBtn.disabled = VF.cd > 0;
+        vBtn.textContent = VF.cd > 0 ? "تم الإرسال ✓ (" + VF.cd + ")" : "إعادة الإرسال";
+      } else { vBtn.textContent = "إرسال رابط التحقق"; vBtn.disabled = false; }
+    }
+    function vStopTimers() { clearInterval(VF.cdT); VF.cdT = null; clearInterval(VF.poll); VF.poll = null; }
+    function vReset(silent) {
+      var was = VF.state !== "idle";
+      VF.gen++; vStopTimers(); VF.state = "idle"; VF.email = ""; VF.cd = 0; VF.busy = false; vRender();
+      if (was) VF.cancelP = invoke("cancelVerification");
+      if (!silent) clearAlert("mailAlert");
+    }
+    window.__authVerifyReset = vReset;
+    function vCheck() {}   /* لا فحص دوري: الحساب يُنشأ عند الضغط على الرابط */
+    function vCooldown() {
+      VF.cd = 60; clearInterval(VF.cdT);
+      VF.cdT = setInterval(function () { VF.cd--; if (VF.cd <= 0) { VF.cd = 0; clearInterval(VF.cdT); VF.cdT = null; } vRender(); }, 1000);
+    }
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) vCheck(); });
+    window.addEventListener("focus", vCheck);
+    $("mailEmail").addEventListener("input", function () { if (VF.state !== "idle") vReset(); });
+    vBtn.addEventListener("click", function () {
+      if (VF.busy || vBtn.disabled) return;
+      clearAlert("mailAlert");
+      if (!regComplete()) { submitReg(); return; }
+      if (VF.state === "sent") {
+        VF.busy = true; var rg = VF.gen;
+        tsWait().then(function () { if (rg !== VF.gen) return null; if (!TS.tok) return { status: "error", error: "captcha" }; return invoke("startSignup", { email: VF.email, ts: tsTake() }); }).then(function (r) {
+          if (!r || rg !== VF.gen) return;
+          VF.busy = false;
+          if (r.status !== "sent") { if (r.status === "cooldown") vCooldown(); return setAlert("mailAlert", tsMsg(r, "تعذّر إرسال الرابط، حاول مرة أخرى.")); }
+          setAlert("mailAlert", "تم إرسال رابط جديد. شوف الوارد أو السبام.", "ok"); vCooldown(); vRender();
+        }, function () { if (rg !== VF.gen) return; VF.busy = false; setAlert("mailAlert", "تعذّر الاتصال. حاول مرة أخرى."); });
+        return;
+      }
+      var em = $("mailEmail").value.trim().toLowerCase();
+      if (!em || !EMAIL_RE.test(em)) { setAlert("mailAlert", "اكتب بريدًا إلكترونيًا صحيحًا."); markInvalid("mailEmail"); return; }
+      VF.state = "sending"; VF.busy = true; vRender(); var sg = VF.gen;
+      tsWait().then(function () { if (sg !== VF.gen) return null; if (!TS.tok) return { status: "error", error: "captcha" }; return invoke("startSignup", { email: em, ts: tsTake() }); }).then(function (r) {
+        if (!r || sg !== VF.gen) return;
+        VF.busy = false;
+        if (r.status === "sent") {
+          VF.email = em; VF.state = "sent"; vRender();
+          if (VF.state === "sent") { vCooldown(); setAlert("mailAlert", "أرسلنا رابط التحقق إلى بريدك. افتحه (من أي جهاز) وحدّد كلمة المرور لإنشاء حسابك. شوف السبام لو ماظهرش.", "ok"); }
+          else setAlert("mailAlert", "تم التحقق من بريدك. اضغط إنشاء الحساب.", "ok");
+          vRender(); return;
+        }
+        VF.state = "idle"; vRender();
+        if (r.status === "exists") { markInvalid("mailEmail"); return setAlert("mailAlert", "هذا البريد الإلكتروني مسجّل بالفعل. جرّب تسجيل الدخول بدلًا من ذلك."); }
+        setAlert("mailAlert", tsMsg(r, "تعذّر إرسال رابط التحقق، حاول مرة أخرى."));
+      }, function () { if (sg !== VF.gen) return; VF.busy = false; VF.state = "idle"; vRender(); setAlert("mailAlert", "تعذّر الاتصال. حاول مرة أخرى."); });
+    });
+    function sendMail() {
+      clearAlert("mailAlert");
+      var em = $("mailEmail").value.trim().toLowerCase();
+      if (VF.state !== "verified" || em !== VF.email) { setAlert("mailAlert", "تحقق من بريدك الإلكتروني أولًا."); return; }
+      call("sendEmailLink", { email: em, profile: S.draft }, "جارٍ إنشاء حسابك…").then(function (r) {
+        afterAuth(r, function (x) {
+          go("register"); $("mailBox").hidden = false; $("mailEmail").value = em;
+          setAlert("mailAlert", x.message || "تعذّر إنشاء الحساب، حاول مرة أخرى.");
+        });
+      });
+    }
+    $("mailSend").addEventListener("click", function () { pendingMethod = sendMail; submitReg(); });
+
+    $("regForm").addEventListener("submit", function (e) {
+      e.preventDefault(); clearAlert("regAlert"); clearInvalid();
+      var miss = [];
+      if (!$("loginName").value.trim()) miss.push("loginName");
+      if (!gender.reg.get()) miss.push("regGender");
+      if (!$("regDept").value) miss.push("regDept");
+      if (!$("regYear").value) miss.push("regYear");
+      if (!$("agreeTermsCheck").checked) miss.push("agreeTermsCheck");
+      if (miss.length) {
+        pendingMethod = null;
+        setAlert("regAlert", "كمّل البيانات المطلوبة."); $("regAlert").dataset.inc = "1";
+        markInvalid.apply(null, miss); syncMethods(); return;
+      }
+      readDraft(); var cb = pendingMethod; pendingMethod = null; if (cb) cb();
+    });
+
+    $("cpForm").addEventListener("submit", function (e) {
+      e.preventDefault(); clearAlert("cpAlert"); clearInvalid();
+      var bad = function (msg, id) { setAlert("cpAlert", msg); markInvalid(id); };
+      if (!$("cpName").value.trim()) return bad("اكتب اسم المستخدم.", "cpName");
+      if (!$("cpDept").value || !$("cpYear").value) { setAlert("cpAlert", "اختر الشعبة والفرقة لإكمال حسابك."); if (!$("cpDept").value) markInvalid("cpDept"); if (!$("cpYear").value) markInvalid("cpYear"); return; }
+      if (!$("cpTerms").checked) return bad("يجب الموافقة على شروط الاستخدام وسياسة الخصوصية.", "cpTerms");
+      profile = { name: $("cpName").value.trim(), gender: gender.cp.get(), dept: $("cpDept").value, year: $("cpYear").value, terms: true };
+      call("saveProfile", profile, "جارٍ حفظ بياناتك…").then(function (r) {
+        if (r.status === "ok") return finish();
+        go("complete"); setAlert("cpAlert", r.message || "تعذّر حفظ بياناتك، حاول مرة أخرى.");
+      });
+    });
+    $("cpLogout").addEventListener("click", function () { try { if (typeof bridge.signOut === "function") bridge.signOut(); } catch (e) {} go("login"); });
+
+    function verified(p) { profile = p || S.draft || profile; S.pending = null; S.draft = null; save(); finish(); }
+    window.AuthUI = {
+      show: go, emailVerified: verified,
+      /* إكمال بيانات حساب موجود بدون ملف بيانات (يُستدعى من الموقع) */
+      complete: function (p) { profile = p || {}; go("complete"); },
+      /* بعد تسجيل الخروج: تفريغ الحقول والرجوع لعرض الدخول (بدون تغيير حالة المصباح) */
+      reset: function () {
+        ["loginEmail", "loginPass", "loginName", "mailEmail", "mailPass"].forEach(function (id) { var e = $(id); if (e) e.value = ""; }); if (window.__authVerifyReset) window.__authVerifyReset(true);
+        removeLoading(); stopSplash(); stopCooldown(); closeScreens(); setView("login");
+      },
+      /* انتهت الجلسة أثناء انتظار تأكيد البريد */
+      sessionEnded: function () { if (S.pending) { S.pending = null; save(); if (!$("screenVerify").hidden) go("login"); } },
+      /* نتائج دخول Google بعد الرجوع من redirect (يستدعيها js/auth-bridge.js) */
+      googleFail: function (msg) { removeLoading(); go("login"); setAlert("loginAlert", msg || "حدث خطأ، حاول مرة أخرى."); },
+      googleExists: function () { go("register"); showExists(); },
+      clearDraft: function () { S.draft = null; save(); },
+      /* يستخدمه auth-bridge لاسترجاع مسودة التسجيل عند رجوع redirect فقد ماركره */
+      getDraft: function () { return S.draft ? { name: S.draft.name, gender: S.draft.gender, dept: S.draft.dept, year: S.draft.year, terms: !!S.draft.terms } : null; }
+    };
+    $("verifyOk").addEventListener("click", function () {
+      if (!S.pending) return go("register");
+      call("checkEmailVerified", { email: S.pending.email }, "جارٍ التحقق من البريد…").then(function (r) {
+        if (r.status === "verified") return verified(r.profile);
+        if (r.status === "incomplete") { S.pending = null; save(); profile = r.profile || {}; return go("complete"); }
+        go("verify");
+        setAlert("verifyAlert", r.status === "pending" ? "لم يتم التحقق من البريد الإلكتروني بعد. افتح الرسالة واضغط على الرابط." : (r.message || "تعذّر التحقق، حاول مرة أخرى."));
+      });
+    });
+    $("resendBtn").addEventListener("click", function () {
+      if (cd > 0 || !S.pending) return;
+      invoke("resendEmailLink", { email: S.pending.email }).then(function (r) {
+        if (r.status !== "sent") return setAlert("verifyAlert", r.message || "تعذّر إرسال الرابط، حاول مرة أخرى.");
+        setAlert("verifyAlert", "تم إرسال رابط تأكيد جديد إلى بريدك الإلكتروني.", "ok");
+        S.pending.cdEnd = Date.now() + CD_TOTAL * 1000; save(); startCooldown(CD_TOTAL);
+      });
+    });
+    $("existsLogin").addEventListener("click", function () { go("login"); });
+    $("existsClose").addEventListener("click", function () { $("existsModal").hidden = true; });
+    $("verifyLogout").addEventListener("click", function () {
+      S.pending = null; save();
+      try { if (typeof bridge.signOut === "function") bridge.signOut(); } catch (e) {}
+      go("login");
+    });
+  }
+
+  function boot() {
+    gender.reg = makeGender($("regGender"), true); gender.cp = makeGender($("cpGender"));
+    wireEyes(); wire(); enhanceSelects(); restoreDraft(); syncMethods();
+    var rl = resetLink();
+    if (rl) return rl.mode === "signup" ? startSignupLink(rl.code) : rl.mode === "verifyEmail" ? startVerifyLink(rl.code) : startReset(rl.code);
+    if (S.pending) { S.pending = null; save(); }   /* لا يوجد انتظار تأكيد بريد بعد الآن */
+    go("lamp-off");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+
+})();
+
+
+/* ══ زر السقوط (دخول/خروج): الإجراء الأصلي يُنفَّذ فقط في آخر ثانية من السقوط ══ */
+(function () {
+  var MARKUP = '<svg class="door" viewBox="0 0 100 100"><path d="M93.4 86.3H58.6c-1.9 0-3.4-1.5-3.4-3.4V17.1c0-1.9 1.5-3.4 3.4-3.4h34.8c1.9 0 3.4 1.5 3.4 3.4v65.8c0 1.9-1.5 3.4-3.4 3.4z"/><circle cx="66" cy="50" r="3.7"/></svg><svg class="doorway" viewBox="0 0 100 100"><path d="M93.4 86.3H58.6c-1.9 0-3.4-1.5-3.4-3.4V17.1c0-1.9 1.5-3.4 3.4-3.4h34.8c1.9 0 3.4 1.5 3.4 3.4v65.8c0 1.9-1.5 3.4-3.4 3.4z" /><path class="bang" d="M40.5 43.7L26.6 31.4l-2.5 6.7zM41.9 50.4l-19.5-4-1.4 6.3zM40 57.4l-17.7 3.9 3.9 5.7z" /></svg><svg class="figure" viewBox="0 0 100 100"><circle cx="52.1" cy="32.4" r="6.4" /><path d="M50.7 62.8c-1.2 2.5-3.6 5-7.2 4-3.2-.9-4.9-3.5-4-7.8.7-3.4 3.1-13.8 4.1-15.8 1.7-3.4 1.6-4.6 7-3.7 4.3.7 4.6 2.5 4.3 5.4-.4 3.7-2.8 15.1-4.2 17.9z" /><g class="arm1"><path d="M55.5 56.5l-6-9.5c-1-1.5-.6-3.5.9-4.4 1.5-1 3.7-1.1 4.6.4l6.1 10c1 1.5.3 3.5-1.1 4.4-1.5.9-3.5.5-4.5-.9z" /><path class="wrist1" d="M69.4 59.9L58.1 58c-1.7-.3-2.9-1.9-2.6-3.7.3-1.7 1.9-2.9 3.7-2.6l11.4 1.9c1.7.3 2.9 1.9 2.6 3.7-.4 1.7-2 2.9-3.8 2.6z" /></g><g class="arm2"><path d="M34.2 43.6L45 40.3c1.7-.6 3.5.3 4 2 .6 1.7-.3 4-2 4.5l-10.8 2.8c-1.7.6-3.5-.3-4-2-.6-1.6.3-3.4 2-4z" /><path class="wrist2" d="M27.1 56.2L32 45.7c.7-1.6 2.6-2.3 4.2-1.6 1.6.7 2.3 2.6 1.6 4.2L33 58.8c-.7 1.6-2.6 2.3-4.2 1.6-1.7-.7-2.4-2.6-1.7-4.2z" /></g><g class="leg1"><path d="M52.1 73.2s-7-5.7-7.9-6.5c-.9-.9-1.2-3.5-.1-4.9 1.1-1.4 3.8-1.9 5.2-.9l7.9 7c1.4 1.1 1.7 3.5.7 4.9-1.1 1.4-4.4 1.5-5.8.4z" /><path class="calf1" d="M52.6 84.4l-1-12.8c-.1-1.9 1.5-3.6 3.5-3.7 2-.1 3.7 1.4 3.8 3.4l1 12.8c.1 1.9-1.5 3.6-3.5 3.7-2 0-3.7-1.5-3.8-3.4z" /></g><g class="leg2"><path d="M37.8 72.7s1.3-10.2 1.6-11.4 2.4-2.8 4.1-2.6c1.7.2 3.6 2.3 3.4 4l-1.8 11.1c-.2 1.7-1.7 3.3-3.4 3.1-1.8-.2-4.1-2.4-3.9-4.2z" /><path class="calf2" d="M29.5 82.3l9.6-10.9c1.3-1.4 3.6-1.5 5.1-.1 1.5 1.4.4 4.9-.9 6.3l-8.5 9.6c-1.3 1.4-3.6 1.5-5.1.1-1.4-1.3-1.5-3.5-.2-5z" /></g></svg>';
+  var ST = {
+    "default":  {"--figure-duration":"100","--transform-figure":"none","--walking-duration":"100","--transform-arm1":"none","--transform-wrist1":"none","--transform-arm2":"none","--transform-wrist2":"none","--transform-leg1":"none","--transform-calf1":"none","--transform-leg2":"none","--transform-calf2":"none"},
+    "hover":    {"--figure-duration":"100","--transform-figure":"translateX(1.5px)","--walking-duration":"100","--transform-arm1":"rotate(-5deg)","--transform-wrist1":"rotate(-15deg)","--transform-arm2":"rotate(5deg)","--transform-wrist2":"rotate(6deg)","--transform-leg1":"rotate(-10deg)","--transform-calf1":"rotate(5deg)","--transform-leg2":"rotate(20deg)","--transform-calf2":"rotate(-20deg)"},
+    "walking1": {"--figure-duration":"300","--transform-figure":"translateX(11px)","--walking-duration":"300","--transform-arm1":"translateX(-4px) translateY(-2px) rotate(120deg)","--transform-wrist1":"rotate(-5deg)","--transform-arm2":"translateX(4px) rotate(-110deg)","--transform-wrist2":"rotate(-5deg)","--transform-leg1":"translateX(-3px) rotate(80deg)","--transform-calf1":"rotate(-30deg)","--transform-leg2":"translateX(4px) rotate(-60deg)","--transform-calf2":"rotate(20deg)"},
+    "walking2": {"--figure-duration":"400","--transform-figure":"translateX(17px)","--walking-duration":"300","--transform-arm1":"rotate(60deg)","--transform-wrist1":"rotate(-15deg)","--transform-arm2":"rotate(-45deg)","--transform-wrist2":"rotate(6deg)","--transform-leg1":"rotate(-5deg)","--transform-calf1":"rotate(10deg)","--transform-leg2":"rotate(10deg)","--transform-calf2":"rotate(-20deg)"},
+    "falling1": {"--figure-duration":"1600","--walking-duration":"400","--transform-arm1":"rotate(-60deg)","--transform-wrist1":"none","--transform-arm2":"rotate(30deg)","--transform-wrist2":"rotate(120deg)","--transform-leg1":"rotate(-30deg)","--transform-calf1":"rotate(-20deg)","--transform-leg2":"rotate(20deg)"},
+    "falling2": {"--walking-duration":"300","--transform-arm1":"rotate(-100deg)","--transform-arm2":"rotate(-60deg)","--transform-wrist2":"rotate(60deg)","--transform-leg1":"rotate(80deg)","--transform-calf1":"rotate(20deg)","--transform-leg2":"rotate(-60deg)"},
+    "falling3": {"--walking-duration":"500","--transform-arm1":"rotate(-30deg)","--transform-wrist1":"rotate(40deg)","--transform-arm2":"rotate(50deg)","--transform-wrist2":"none","--transform-leg1":"rotate(-30deg)","--transform-leg2":"rotate(20deg)","--transform-calf2":"none"}
+  };
+  function upd(b, s) {
+    var o = ST[s]; if (!o) return; b.__fbS = s;
+    for (var k in o) b.style.setProperty(k, o[k]);
+  }
+  function enhance(b, kind) {
+    if (!b || b.__fb) return; b.__fb = 1;
+    b.classList.add("fb", kind === "in" ? "fb--in" : "fb--out");
+    Array.prototype.slice.call(b.childNodes).forEach(function (n) {
+      if (n.nodeType === 3 && n.nodeValue.trim()) {
+        var s = document.createElement("span"); s.className = "fb-text"; s.textContent = n.nodeValue.trim();
+        b.replaceChild(s, n);
+      } else if (n.nodeType === 3) { b.removeChild(n); }
+    });
+    b.insertAdjacentHTML("beforeend", MARKUP);
+    b.__fbS = "default";
+    b.addEventListener("mouseenter", function () { if (b.__fbS === "default") upd(b, "hover"); });
+    b.addEventListener("mouseleave", function () { if (b.__fbS === "hover") upd(b, "default"); });
+  }
+  function run(b, act) {
+    b.__fbBusy = true; b.classList.add("clicked"); upd(b, "walking1");
+    setTimeout(function () { b.classList.add("door-open"); }, 150);
+    setTimeout(function () {
+      b.classList.add("door-slammed"); upd(b, "walking2");
+      setTimeout(function () {
+        b.classList.add("falling"); upd(b, "falling1");
+        setTimeout(function () {
+          upd(b, "falling2");
+          setTimeout(function () {
+            upd(b, "falling3"); act();
+            setTimeout(function () {
+              b.classList.remove("clicked", "door-open", "door-slammed", "falling"); upd(b, "default"); b.__fbBusy = false;
+            }, 1000);
+          }, parseInt(ST.falling2["--walking-duration"], 10));
+        }, parseInt(ST.falling1["--walking-duration"], 10));
+      }, parseInt(ST.walking2["--figure-duration"], 10));
+    }, parseInt(ST.walking1["--figure-duration"], 10));
+  }
+  function loginReady() {
+    var e = document.getElementById("loginEmail"), p = document.getElementById("loginPass");
+    var em = e ? e.value.trim() : "", pw = p ? p.value : "";
+    return !!(em && pw && /^\S+@\S+\.\S+$/.test(em));
+  }
+  function init() {
+    enhance(document.getElementById("mainAuthBtn"), "in");
+    enhance(document.getElementById("logoutBtnProfile"), "out");
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target && e.target.closest && e.target.closest("#mainAuthBtn,#logoutBtnProfile");
+    if (!b) return;
+    if (b.__fbGo) { b.__fbGo = false; return; }
+    var kind = b.id === "mainAuthBtn" ? "in" : "out";
+    if (kind === "in" && !loginReady()) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (b.disabled || b.__fbBusy) return;
+    enhance(b, kind);
+    run(b, function () { b.__fbGo = true; b.click(); });
+  }, true);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
+})();
