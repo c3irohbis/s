@@ -308,7 +308,16 @@ function _femaleSVG(size) {
     var al = $("regAlert"); if (ok && al && al.dataset.inc) { delete al.dataset.inc; clearAlert("regAlert"); }
   }
   function restoreDraft() { var d = S.draft; if (!d) return; $("loginName").value = d.name || ""; if (d.gender) gender.reg.set(d.gender); $("regDept").value = d.dept || ""; $("regYear").value = d.year || ""; $("agreeTermsCheck").checked = !!d.terms; }
-  function prefillComplete() { var u = profile; if (!u) return; $("cpName").value = u.name || ""; if (u.gender) gender.cp.set(u.gender); $("cpDept").value = u.dept || ""; $("cpYear").value = u.year || ""; $("cpTerms").checked = !!u.terms; }
+  function prefillComplete() {
+    var u = profile; if (!u) return;
+    $("cpName").value = u.name || ""; if (u.gender) gender.cp.set(u.gender); $("cpDept").value = u.dept || ""; $("cpYear").value = u.year || ""; $("cpTerms").checked = !!u.terms;
+    /* نعرض الخانات الناقصة بس (لو مفيش ناقص نعرض الكل) */
+    var m = draftMissing({ name: u.name, gender: u.gender, dept: u.dept, year: u.year, terms: u.terms });
+    var any = m.name || m.gender || m.dept || m.year || m.terms; if (!any) m = { name: true, gender: true, dept: true, year: true, terms: true };
+    $("cpName").parentNode.hidden = !m.name; $("cpGender").hidden = !m.gender;
+    var gr = $("cpDept").closest(".av-grid2"); if (gr) gr.hidden = !(m.dept || m.year);
+    var tr = $("cpTerms").closest(".terms-row"); if (tr) tr.hidden = !m.terms;
+  }
   function openVerify() { openScreen("Verify"); if (S.pending) $("verifyEmail").textContent = S.pending.email; var r = S.pending ? Math.ceil((S.pending.cdEnd - Date.now()) / 1000) : 0; startCooldown(r > 0 ? r : 0); }
   /* دخول ناجح: فتح الموقع مباشرة بدون شاشة نجاح */
   function finish() { if (typeof bridge.onDone === "function") bridge.onDone(profile); else go("login"); }
