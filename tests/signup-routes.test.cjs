@@ -5,7 +5,7 @@ const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
 const env = { FIREBASE_PROJECT_ID: 'p', SIGNUP_SA_KEY: JSON.stringify({ client_email: 'sa@x', private_key: pem }), GMAIL_CLIENT_ID: 'c', GMAIL_CLIENT_SECRET: 's', GMAIL_REFRESH_TOKEN: 'r', TURNSTILE_SECRET: 'x' };
 const req = (path, body) => new Request('https://w.example' + path, { method: 'POST', body: JSON.stringify(body) });
 function mk({ existing = false, squat = false, lookupFail = false, mailOk = true, createResult = 'ok', db = {} } = {}) {
-  const log = { sent: [], created: [], rpc: [], fetch: [], diag: [] };
+  const log = { sent: [], created: [], rpc: [], fetch: [] };
   const f = async (url, opts) => {
     log.fetch.push(String(url));
     const u = String(url);
@@ -22,10 +22,9 @@ function mk({ existing = false, squat = false, lookupFail = false, mailOk = true
     if (u.includes('gmail.googleapis.com')) { if (!mailOk) return new Response('{}', { status: 500 }); log.sent.push(JSON.parse(opts.body).raw); return Response.json({}); }
     throw Error('unexpected ' + u);
   };
-  const rpc = async (name, body) => { if (name === 'signup_diag') { log.diag.push(body); return null; } log.rpc.push([name, body]); return (db[name] || (() => ({ ok: true })))(body); };
+  const rpc = async (name, body) => { log.rpc.push([name, body]); return (db[name] || (() => ({ ok: true })))(body); };
   return { f, rpc, log };
 }
-import('../worker/signup-routes.js').then((m) => m._setBotCheck(true));
 const run = async (path, body, o) => { const m = mk(o); const mod = await import('../worker/signup-routes.js'); mod._clearTokenCache(); const r = await mod.handleSignup(req(path, (body && typeof body === 'object' && !('ts' in body) && path.endsWith('/start')) ? { ...body, ts: 'good' } : body), env, { rpc: m.rpc, fetch: m.f, ip: '1.2.3.4' }); return { status: r.status, json: await r.json(), ...m }; };
 
 test('start sends one mail to the typed address only, stores only a hash, link uses hash fragment', async () => {
@@ -64,7 +63,7 @@ test('start: older links are invalidated only after the mail was sent', async ()
 test('start: runs the lookup/send in the background when waitUntil is given and answers immediately', async () => {
   const m = mk(); const mod = await import('../worker/signup-routes.js'); mod._clearTokenCache(); const jobs = [];
   const r = await mod.handleSignup(req('/v1/signup/start', { email: 'a@b.com', ts: 'good' }), env, { rpc: m.rpc, fetch: m.f, waitUntil: (p) => jobs.push(p) });
-  assert.equal(r.status, 200); assert.equal(jobs.length, 2); await Promise.all(jobs); assert.equal(m.log.sent.length, 1);
+  assert.equal(r.status, 200); assert.equal(jobs.length, 1); await Promise.all(jobs); assert.equal(m.log.sent.length, 1);
 });
 test('oversized body without Content-Length is cut at 2048 bytes while streaming', async () => {
   const mod = await import('../worker/signup-routes.js');
@@ -179,19 +178,4 @@ test('mail is multipart plain+html with transactional headers, visible matching 
   assert.ok(parts[0].includes(link) && parts[0].includes('a+b@example.com'));
   assert.ok(parts[1].split(link).length - 1 >= 3);   // button href, visible text, href of visible link
   assert.doesNotMatch(parts[1], /<img|track|pixel/i);
-});
-
-test('diagnostics: outcome and a sanitized code are recorded, never the email or token', async () => {
-  const mod = await import('../worker/signup-routes.js');
-  const m = mk(); const jobs = [];
-  const r = await mod.handleSignup(req('/v1/signup/start', { email: 'a@b.com', ts: '', ce: '110200' }), { SIGNUP_SA_KEY: 'k', GMAIL_REFRESH_TOKEN: 'r', GMAIL_CLIENT_ID: 'i', GMAIL_CLIENT_SECRET: 's', TURNSTILE_SECRET: 't' }, { rpc: m.rpc, fetch: m.f, waitUntil: (p) => jobs.push(p) });
-  assert.equal(r.status, 400); await Promise.all(jobs);
-  assert.deepEqual(m.log.diag, [{ p_outcome: 'no-token', p_detail: '110200' }]);
-  assert.ok(!JSON.stringify(m.log.diag).includes('a@b.com'));
-});
-
-test('bot check can be switched off: the mail is sent without a token and limits still apply', async () => {
-  const mod = await import('../worker/signup-routes.js'); mod._setBotCheck(false);
-  try { const r = await run('/v1/signup/start', { email: 'a@b.com', ts: '' }); assert.equal(r.status, 200); assert.equal(r.log.sent.length, 1); assert.ok(r.log.rpc.some((c) => c[0] === 'signup_start')); }
-  finally { mod._setBotCheck(true); }
 });
