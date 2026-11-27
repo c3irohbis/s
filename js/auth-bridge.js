@@ -28,7 +28,7 @@ let busy = false;
 /* فتح الصفحة من رابط في رسالة Firebase (?mode=resetPassword أو verifyEmail مع oobCode):
    نمنع فتح الموقع (حتى لو كانت هناك جلسة محفوظة) إلى أن تنتهي خطوات الرابط */
 let resetHold = (() => {
-  try { const q = new URLSearchParams(location.search); return (q.get("mode") === "resetPassword" || q.get("mode") === "verifyEmail") && !!q.get("oobCode"); }
+  try { if (/(?:^#|&)signup=[A-Za-z0-9_-]{43}(?:&|$)/.test(location.hash || "")) return true; const q = new URLSearchParams(location.search); return (q.get("mode") === "resetPassword" || q.get("mode") === "verifyEmail") && !!q.get("oobCode"); }
   catch (e) { return false; }
 })();
 
@@ -366,6 +366,49 @@ B.applyVerify = async function ({ code }) {
 B.endReset = async function () {
   resetHold = false;
   try { if (auth().currentUser) await signOut(auth()); } catch (e) {}
+};
+
+/* تسجيل بالبريد بلا حساب Auth قبل الضغط على الرابط (الخادم يرسل الرسالة وينشئ الحساب عند الضغط) */
+const SIGNUP_API = "https://bliss-gateway.cairohbis.workers.dev/v1/signup/";
+const SU_MSG = {
+  "invalid-email": "اكتب بريدًا إلكترونيًا صحيحًا.",
+  "cooldown": "انتظر دقيقة قبل طلب رابط جديد.",
+  "rate-limited": "محاولات كثيرة. حاول لاحقًا.",
+  "send-failed": "تعذّر إرسال الرسالة الآن. حاول بعد قليل.",
+  "weak-password": "كلمة المرور يجب ألا تقل عن 6 أحرف.",
+  "invalid-link": "الرابط غير صالح أو انتهت صلاحيته. اطلب رابطًا جديدًا.",
+  "captcha": "تعذّر التحقق من أنك لست روبوتًا. انتظر لحظة وحاول مرة أخرى.",
+  "exists": "هذا البريد مسجّل بالفعل. سجّل دخولك."
+};
+async function signupCall(path, body) {
+  let r;
+  try { r = await fetch(SIGNUP_API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(25000) }); }
+  catch (_) { return { ok: false, error: "network" }; }
+  let j = {}; try { j = await r.json(); } catch (_) {}
+  return { ok: r.ok, error: j && j.error, email: j && j.email };
+}
+const suMsg = (e) => SU_MSG[e] || (e === "network" ? "تعذّر الاتصال. تأكد من الإنترنت وحاول مرة أخرى." : "الخدمة غير متاحة الآن. حاول بعد قليل.");
+B.startSignup = async function ({ email, ts }) {
+  const r = await signupCall("start", { email: String(email || "").trim().toLowerCase(), ts: ts || "" });
+  if (r.ok) return { status: "sent" };
+  return { status: r.error === "cooldown" ? "cooldown" : "error", message: suMsg(r.error) };
+};
+B.peekSignup = async function ({ token }) {
+  const r = await signupCall("peek", { token });
+  if (r.ok && r.email) return { status: "ok", email: r.email };
+  return { status: "invalid", message: suMsg(r.error === "invalid-link" ? "invalid-link" : r.error) };
+};
+B.completeSignup = async function ({ token, password }) {
+  busy = true;
+  const r = await signupCall("complete", { token, password });
+  if (!r.ok || !r.email) {
+    busy = false;
+    return { status: r.error === "invalid-link" ? "invalid" : r.error === "exists" ? "exists" : "error", message: suMsg(r.error) };
+  }
+  try { await signInWithEmailAndPassword(auth(), r.email, password); }
+  catch (_) { busy = false; return { status: "error", message: "تم إنشاء حسابك. سجّل دخولك من شاشة الدخول." }; }
+  resetHold = false;
+  return { status: "ok", email: r.email };
 };
 
 B.resendEmailLink = async function () {

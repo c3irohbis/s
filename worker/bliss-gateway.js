@@ -9,6 +9,7 @@ import {handleMyDocs} from './mydocs-routes.js';
 import {handleAttendance} from './attendance-routes.js';
 import {handleNews} from './news-routes.js';
 import {handleAuthority,drainAuthority} from './authority-routes.js';
+import {handleSignup} from './signup-routes.js';
 import {handleAI} from './ai-routes.js';
 import {getAISnapshot,invalidateAllAISnapshots,cleanSnapshotField} from './ai-context.js';
 /* ══════════════════════════════════════════════════════════════════
@@ -1192,6 +1193,18 @@ export default {
 
     // GET /v1/health — سطحي، بلا توكن ولا استعلام قاعدة
     if (isHealth) return ok(request, env, { ok: true }, { complete: true, count: 0, generatedAt: Date.now() }, { "Cache-Control": "no-store" });
+
+    // تسجيل بريد بلا حساب Auth قبل الضغط على الرابط: مسارات عامة (بلا توكن) بحد معدل أضيق لكل IP
+    if (url.pathname === "/v1/signup/start" || url.pathname === "/v1/signup/peek" || url.pathname === "/v1/signup/complete") {
+      if (!rateLimit("su:" + ip, url.pathname === "/v1/signup/start" ? 5 : 20)) return err(request, env, 429, "rate-limited");
+      const response = await handleSignup(request, env, { ip, waitUntil: (p) => ctx.waitUntil(p), rpc: async (name, body) => {
+        const r = await sb(env, "/rpc/" + name, { method: "POST", body });
+        if (!r.ok) throw Error("signup-backend");
+        return r.data;
+      } });
+      const headers = new Headers(response.headers); for (const [k, v] of Object.entries(corsHeaders(request, env))) headers.set(k, v);
+      return new Response(response.body, { status: response.status, headers });
+    }
 
     const ROUTES = {
       "GET /v1/sheets/list":1,"POST /v1/sheets/mutate":1,"POST /v1/sheets/completion":1,"POST /v1/sheets/completion-record":1,"GET /v1/sheets/badge":1,"POST /v1/sheets/read":1,

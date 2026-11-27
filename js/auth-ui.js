@@ -270,7 +270,7 @@ function _femaleSVG(size) {
      ══════════════════════════════════════════════════════════════════════ */
   var NOT_CONNECTED = "لم يتم ربط نظام المصادقة بعد.";
   var bridge = window.AuthBridge = window.AuthBridge || {};
-  ["loginEmail", "google", "sendEmailLink", "resendEmailLink", "checkEmailVerified", "sendVerification", "pollVerified", "cancelVerification", "saveProfile", "resetPassword", "checkResetCode", "confirmReset", "applyVerify"].forEach(function (m) {
+  ["loginEmail", "google", "sendEmailLink", "resendEmailLink", "checkEmailVerified", "sendVerification", "pollVerified", "cancelVerification", "saveProfile", "resetPassword", "checkResetCode", "confirmReset", "applyVerify", "startSignup", "peekSignup", "completeSignup"].forEach(function (m) {
     if (typeof bridge[m] !== "function") bridge[m] = function () { return { status: "error", message: NOT_CONNECTED }; };
   });
   var bridgeReady = new Promise(function (res) { window.__resolveAuthBridge = res; });
@@ -425,6 +425,11 @@ function _femaleSVG(size) {
   /* الصفحة فُتحت من رابط الاستعادة المرسل للبريد */
   function resetLink() {
     try {
+      var hm = /(?:^#|&)signup=([A-Za-z0-9_-]{43})(?:&|$)/.exec(location.hash || "");
+      if (hm) {
+        if (window.history && history.replaceState) history.replaceState(null, "", location.pathname + location.search);
+        return { mode: "signup", code: hm[1] };
+      }
       var q = new URLSearchParams(location.search), mode = q.get("mode"), code = q.get("oobCode");
       if ((mode !== "resetPassword" && mode !== "verifyEmail") || !code) return null;
       if (window.history && history.replaceState) history.replaceState(null, "", location.pathname + location.hash);
@@ -439,7 +444,23 @@ function _femaleSVG(size) {
       else setAlert("loginAlert", r.message || "رابط التأكيد غير صالح أو انتهت صلاحيته.");
     });
   }
+  /* رابط إنشاء الحساب من البريد: لا حساب Auth قبل هذه الخطوة. الباسورد يُحدَّد هنا فقط */
+  var suToken = null;
+  function setResetMode(signup) {
+    var h = document.querySelector("#screenReset .av-h1"), sub = document.querySelector("#screenReset .av-sub");
+    if (h) h.textContent = signup ? "اختر كلمة المرور" : "كلمة مرور جديدة";
+    if (sub) sub.textContent = signup ? "تم التحقق من بريدك. اختر كلمة مرور لإكمال إنشاء حسابك." : "تم التحقق من بريدك. اختر كلمة مرور جديدة.";
+    $("rpSave").textContent = signup ? "إنشاء الحساب" : "حفظ كلمة المرور";
+  }
+  function startSignupLink(token) {
+    call("peekSignup", { token: token }, "جارٍ التحقق من الرابط…").then(function (r) {
+      if (r.status === "ok") { suToken = token; rpCode = null; rpEmail = r.email || ""; setResetMode(true); return go("reset"); }
+      suToken = null; endReset(); go("login");
+      setAlert("loginAlert", r.message || "الرابط غير صالح أو انتهت صلاحيته. اطلب رابطًا جديدًا من شاشة إنشاء الحساب.");
+    });
+  }
   function startReset(code) {
+    setResetMode(false); suToken = null;
     if (!FORGOT_ENABLED) { go("login"); setAlert("loginAlert", FORGOT_OFF_MSG); return; }
     rpCode = code; rpEmail = ""; $("rpPass").value = ""; $("rpPass2").value = "";
     call("checkResetCode", { code: code }, "جارٍ التحقق من الرابط…").then(function (r) {
@@ -519,6 +540,23 @@ function _femaleSVG(size) {
       if (!p1) { setAlert("rpAlert", "اكتب كلمة المرور الجديدة."); markInvalid("rpPass"); return; }
       if (p1.length < 6) { setAlert("rpAlert", "كلمة المرور يجب ألا تقل عن 6 أحرف."); markInvalid("rpPass"); return; }
       if (p1 !== p2) { setAlert("rpAlert", "كلمتا المرور غير متطابقتين."); markInvalid("rpPass2"); return; }
+      if (suToken) {
+        var tk = suToken;
+        return call("completeSignup", { token: tk, password: p1 }, "جارٍ إنشاء حسابك…").then(function (r) {
+          if (r.status === "ok") {
+            suToken = null; $("rpPass").value = ""; $("rpPass2").value = "";
+            var em = r.email, nx = S.draft ? call("sendEmailLink", { email: em, profile: S.draft }, "جارٍ إنشاء حسابك…") : call("checkEmailVerified", { email: em }, "جارٍ إنشاء حسابك…");
+            return nx.then(function (x) {
+              if (x.status === "ok" || x.status === "verified") { profile = x.profile || profile; S.draft = null; S.pending = null; save(); return finish(); }
+              profile = x.profile || {}; go("complete");
+              if (x.status === "error") setAlert("cpAlert", x.message || "تعذّر حفظ بياناتك، حاول مرة أخرى.");
+            });
+          }
+          if (r.status === "invalid") { suToken = null; endReset(); go("login"); return setAlert("loginAlert", r.message || "الرابط غير صالح أو انتهت صلاحيته. اطلب رابطًا جديدًا."); }
+          if (r.status === "exists") { suToken = null; var ee = rpEmail; endReset(); go("login"); $("loginEmail").value = ee || ""; return setAlert("loginAlert", r.message || "هذا البريد مسجّل بالفعل. سجّل دخولك."); }
+          go("reset"); setAlert("rpAlert", r.message || "تعذّر إنشاء الحساب، حاول مرة أخرى.");
+        });
+      }
       call("confirmReset", { code: rpCode, password: p1 }, "جارٍ حفظ كلمة المرور…").then(function (r) {
         if (r.status === "ok") {
           var em = rpEmail; endReset(); go("login");
@@ -531,7 +569,7 @@ function _femaleSVG(size) {
       });
     });
     $("rpSave").addEventListener("click", function (e) { e.preventDefault(); $("rpForm").dispatchEvent(new Event("submit", { cancelable: true, bubbles: true })); });
-    $("rpBack").addEventListener("click", function () { endReset(); go("login"); });
+    $("rpBack").addEventListener("click", function () { suToken = null; endReset(); go("login"); });
     $("googleBtn").addEventListener("click", function () {
       call("google", null, "جارٍ الاتصال بحساب Google…").then(function (r) { afterAuth(r, function (x) { fail("login", "loginAlert", x); }); });
     });
@@ -576,13 +614,27 @@ function _femaleSVG(size) {
     /* ── تحقق البريد قبل إنشاء الحساب: زر بجوار البريد + فحص تلقائي للتفعيل ── */
     var VF = { state: "idle", email: "", cd: 0, cdT: null, poll: null, until: 0, busy: false, gen: 0 };
     var vBtn = document.createElement("button");
-    vBtn.type = "button"; vBtn.id = "mailVerify"; vBtn.className = "btn"; vBtn.textContent = "تحقق من الإيميل";
+    vBtn.type = "button"; vBtn.id = "mailVerify"; vBtn.className = "btn"; vBtn.textContent = "إرسال رابط التحقق";
     vBtn.style.cssText = "flex:none;width:auto;min-width:0;white-space:nowrap;padding:0 14px;margin:0;font-size:13px";
     var vField = $("mailEmail").parentNode;
     vField.style.display = "flex"; vField.style.gap = "8px"; vField.style.alignItems = "stretch";
     $("mailEmail").style.flex = "1 1 auto"; $("mailEmail").style.minWidth = "0";
     vField.appendChild(vBtn);
-    $("mailSend").disabled = true;
+    $("mailSend").disabled = true; $("mailSend").style.display = "none";
+    $("mailPass").parentNode.style.display = "none";   /* لا كلمة مرور قبل التحقق: تُحدَّد بعد الضغط على الرابط */
+    /* حماية ضد الروبوتات (Cloudflare Turnstile): مفتاح الموقع عام بطبيعته */
+    var TS = { key: "0x4AAAAAAGVSc8X_-cQ3RZVl", tok: "", id: null, box: null };
+    function tsInit() {
+      if (TS.box) return;
+      TS.box = document.createElement("div"); TS.box.style.cssText = "margin:6px 0;min-height:0";
+      vField.parentNode.insertBefore(TS.box, vField.nextSibling);
+      var go = function () { if (!window.turnstile || TS.id !== null) return; TS.id = window.turnstile.render(TS.box, { sitekey: TS.key, appearance: "interaction-only", callback: function (t) { TS.tok = t; }, "expired-callback": function () { TS.tok = ""; }, "error-callback": function () { TS.tok = ""; } }); };
+      if (window.turnstile) return go();
+      window.__tsReady = go;
+      var sc = document.createElement("script"); sc.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=__tsReady"; sc.async = true; sc.defer = true; document.head.appendChild(sc);
+    }
+    function tsTake() { var t = TS.tok; TS.tok = ""; if (window.turnstile && TS.id !== null) { try { window.turnstile.reset(TS.id); } catch (_) {} } return t; }
+    tsInit();
     function vRender() {
       var st = VF.state, ro = st === "sending" || st === "sent" || st === "verified";
       $("mailEmail").readOnly = ro; $("mailPass").readOnly = ro;
@@ -592,7 +644,7 @@ function _femaleSVG(size) {
       else if (st === "sent") {
         vBtn.disabled = VF.cd > 0;
         vBtn.textContent = VF.cd > 0 ? "تم الإرسال ✓ (" + VF.cd + ")" : "إعادة الإرسال";
-      } else { vBtn.textContent = "تحقق من الإيميل"; vBtn.disabled = false; }
+      } else { vBtn.textContent = "إرسال رابط التحقق"; vBtn.disabled = false; }
     }
     function vStopTimers() { clearInterval(VF.cdT); VF.cdT = null; clearInterval(VF.poll); VF.poll = null; }
     function vReset(silent) {
@@ -602,21 +654,7 @@ function _femaleSVG(size) {
       if (!silent) clearAlert("mailAlert");
     }
     window.__authVerifyReset = vReset;
-    function vCheck() {
-      if (VF.state !== "sent" || VF.busy) return;
-      if (Date.now() > VF.until) { vStopTimers(); setAlert("mailAlert", "انتهت مهلة الانتظار. اضغط إعادة الإرسال."); return; }
-      VF.busy = true; var g = VF.gen;
-      invoke("pollVerified").then(function (r) {
-        if (g !== VF.gen) return;
-        VF.busy = false;
-        if (VF.state !== "sent") return;
-        if (r.status === "verified") { vStopTimers(); VF.state = "verified"; vRender(); setAlert("mailAlert", "تم التحقق من بريدك. اضغط إنشاء الحساب.", "ok"); }
-      });
-    }
-    function vStartPoll() {
-      clearInterval(VF.poll); VF.until = Date.now() + 10 * 60 * 1000;
-      VF.poll = setInterval(function () { if (!document.hidden) vCheck(); }, 5000);
-    }
+    function vCheck() {}   /* لا فحص دوري: الحساب يُنشأ عند الضغط على الرابط */
     function vCooldown() {
       VF.cd = 60; clearInterval(VF.cdT);
       VF.cdT = setInterval(function () { VF.cd--; if (VF.cd <= 0) { VF.cd = 0; clearInterval(VF.cdT); VF.cdT = null; } vRender(); }, 1000);
@@ -630,26 +668,23 @@ function _femaleSVG(size) {
       if (!regComplete()) { submitReg(); return; }
       if (VF.state === "sent") {
         VF.busy = true; var rg = VF.gen;
-        invoke("resendEmailLink").then(function (r) {
+        invoke("startSignup", { email: VF.email, ts: tsTake() }).then(function (r) {
           if (rg !== VF.gen) return;
           VF.busy = false;
-          if (r.status !== "sent") return setAlert("mailAlert", r.message || "تعذّر إرسال الرابط، حاول مرة أخرى.");
-          setAlert("mailAlert", "تم إرسال رابط جديد. شوف الوارد أو السبام.", "ok"); vCooldown(); vStartPoll(); vRender();
+          if (r.status !== "sent") { if (r.status === "cooldown") vCooldown(); return setAlert("mailAlert", r.message || "تعذّر إرسال الرابط، حاول مرة أخرى."); }
+          setAlert("mailAlert", "تم إرسال رابط جديد. شوف الوارد أو السبام.", "ok"); vCooldown(); vRender();
         });
         return;
       }
       var em = $("mailEmail").value.trim().toLowerCase();
       if (!em || !EMAIL_RE.test(em)) { setAlert("mailAlert", "اكتب بريدًا إلكترونيًا صحيحًا."); markInvalid("mailEmail"); return; }
-      var pw = $("mailPass").value;
-      if (!pw) { setAlert("mailAlert", "اكتب كلمة المرور."); markInvalid("mailPass"); return; }
-      if (pw.length < 6) { setAlert("mailAlert", "كلمة المرور يجب ألا تقل عن 6 أحرف."); markInvalid("mailPass"); return; }
       VF.state = "sending"; VF.busy = true; vRender(); var sg = VF.gen;
-      Promise.resolve(VF.cancelP).then(function (c) { if (c && c.status === "error") return { status: "error", message: "تعذّر إنهاء المحاولة السابقة، أعد تحميل الصفحة وحاول." }; return invoke("sendVerification", { email: em, password: pw }); }).then(function (r) {
+      invoke("startSignup", { email: em, ts: tsTake() }).then(function (r) {
         if (sg !== VF.gen) return;
         VF.busy = false;
-        if (r.status === "sent" || r.status === "verified") {
-          VF.email = em; VF.state = r.status === "verified" ? "verified" : "sent"; vRender();
-          if (VF.state === "sent") { vCooldown(); vStartPoll(); setAlert("mailAlert", "أرسلنا رابط التحقق إلى بريدك. افتحه واضغط عليه، وشوف السبام لو ماظهرش. ارجع هنا وهيتفعّل تلقائيًا.", "ok"); }
+        if (r.status === "sent") {
+          VF.email = em; VF.state = "sent"; vRender();
+          if (VF.state === "sent") { vCooldown(); setAlert("mailAlert", "أرسلنا رابط التحقق إلى بريدك. افتحه (من أي جهاز) وحدّد كلمة المرور لإنشاء حسابك. شوف السبام لو ماظهرش.", "ok"); }
           else setAlert("mailAlert", "تم التحقق من بريدك. اضغط إنشاء الحساب.", "ok");
           vRender(); return;
         }
@@ -750,7 +785,7 @@ function _femaleSVG(size) {
     gender.reg = makeGender($("regGender"), true); gender.cp = makeGender($("cpGender"));
     wireEyes(); wire(); enhanceSelects(); restoreDraft(); syncMethods();
     var rl = resetLink();
-    if (rl) return rl.mode === "verifyEmail" ? startVerifyLink(rl.code) : startReset(rl.code);
+    if (rl) return rl.mode === "signup" ? startSignupLink(rl.code) : rl.mode === "verifyEmail" ? startVerifyLink(rl.code) : startReset(rl.code);
     if (S.pending) { S.pending = null; save(); }   /* لا يوجد انتظار تأكيد بريد بعد الآن */
     go("lamp-off");
   }
