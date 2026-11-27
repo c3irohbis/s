@@ -176,6 +176,15 @@ B.loginEmail = async function ({ email, password }) {
   busy = true;
   try {
     const cred = await signInWithEmailAndPassword(auth(), email, password);
+    if (!cred.user.emailVerified) {
+      try { await cred.user.reload(); await cred.user.getIdToken(true); } catch (_) {}
+      if (!cred.user.emailVerified) {
+        let cleanup = true;
+        try { await signOut(auth()); } catch (_) { cleanup = false; }
+        busy = false;
+        return { status: "error", cleanup, message: "بريدك لسه ما اتفعّلش. افتح الرابط اللي وصلك على الإيميل، وبعدها سجّل الدخول" };
+      }
+    }
     return await afterSignIn(cred.user, null);
   } catch (e) { busy = false; return { status: "error", message: errMsg(e) }; }
 };

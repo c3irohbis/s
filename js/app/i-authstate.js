@@ -37,7 +37,9 @@ try {
     Object.defineProperty(window, '__insCaptureAuth', { value: api, configurable: false, writable: false });
   }
 } catch (_) {}
+let _verifyGen = 0; // عدّاد أحداث الدخول: نداء قديم معلّق لا يكمل بعد حدث أحدث
 onAuthStateChanged(auth, _authStateHandler = async (user) => {
+  const _myGen = ++_verifyGen;
   let _insAuthToken;
   try { _insAuthToken = window.__insCaptureAuth?.beginAuthTransition(user); } catch (_) {}
 
@@ -58,6 +60,20 @@ onAuthStateChanged(auth, _authStateHandler = async (user) => {
     window.__updateNoticeStop?.();
     window.AuthUI?.sessionEnded?.(); // انتهت الجلسة أثناء انتظار تأكيد البريد
     showPage("page-login"); return;
+  }
+
+  // 🔒 حساب بريد/باسورد لم يتحقق بريده لا يدخل الموقع أبدًا (الجلسة المحفوظة أو فتح متصفح جديد).
+  // الفحص المحلي أولًا: المتحقق لا يتأخر. لو الحالة المحلية قديمة نعمل reload وتجديد توكن قبل الحكم.
+  // لو فشل signOut تبقى الجلسة غير المتحقق، لكن كل حدث دخول يعيد الفحص نفسه ولا يصل أبدًا لـ page-home.
+  if (user.providerData?.some(p => p.providerId === "password") && !user.emailVerified) {
+    try { await user.reload(); await user.getIdToken(true); } catch (_) {}
+    if (_myGen !== _verifyGen || auth.currentUser?.uid !== user.uid) return; // نداء قديم: حدث أحدث تولّى
+    if (!user.emailVerified) {
+      try { await signOut(auth); } catch (_) {}
+      try { showPage("page-login"); } catch (_) {}
+      try { toast("فعّل بريدك من الرابط اللي وصلك أولًا، وبعدها سجّل الدخول", "error"); } catch (_) {}
+      return;
+    }
   }
 
   // ✅ إظهار الواجهة فورًا بمجرد تأكد Firebase من وجود جلسة صالحة —
