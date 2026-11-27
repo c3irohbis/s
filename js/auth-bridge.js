@@ -388,8 +388,8 @@ async function signupCall(path, body) {
   return { ok: r.ok, error: j && j.error, email: j && j.email };
 }
 const suMsg = (e) => SU_MSG[e] || (e === "network" ? "تعذّر الاتصال. تأكد من الإنترنت وحاول مرة أخرى." : "الخدمة غير متاحة الآن. حاول بعد قليل.");
-B.startSignup = async function ({ email, ts, ce }) {
-  const r = await signupCall("start", { email: String(email || "").trim().toLowerCase(), ts: ts || "", ce: String(ce || "").slice(0, 24) });
+B.startSignup = async function ({ email, ts }) {
+  const r = await signupCall("start", { email: String(email || "").trim().toLowerCase(), ts: ts || "" });
   if (r.ok) return { status: "sent" };
   return { status: r.error === "cooldown" ? "cooldown" : "error", error: r.error, message: suMsg(r.error) };
 };

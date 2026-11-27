@@ -1,3 +1,0 @@
-// Public Realtime credential. Only constant signal is readable; no News table grants.
-window.__BLISS_MILITARY_MODE='supabase';
-window.__BLISS_MILITARY_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhenJnZWJkYXdramN5dWZoYW51Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUyODM2MzgsImV4cCI6MjExMDg1OTYzOH0.6wItLKW7S6573f4fd6H5y0-Bt_bJn_dqxo4ANyB8Fys";

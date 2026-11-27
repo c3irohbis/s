@@ -622,9 +622,39 @@ function _femaleSVG(size) {
     vField.appendChild(vBtn);
     $("mailSend").disabled = true; $("mailSend").style.display = "none";
     $("mailPass").parentNode.style.display = "none";   /* لا كلمة مرور قبل التحقق: تُحدَّد بعد الضغط على الرابط */
-    /* Turnstile is OFF (owner's decision): no widget and no token; server-side limits still apply */
-    function tsMsg(r, fallback) { return (r && r.message) || fallback; }
-    /* Turnstile is OFF (owner's decision): no widget, no waiting; the server limits still apply */
+    /* حماية ضد الروبوتات (Cloudflare Turnstile): مفتاح الموقع عام بطبيعته */
+    var TS = { key: "0x4AAAAAAGVSc8X_-cQ3RZVl", tok: "", id: null, box: null, err: "" };
+    function tsEnsure() {
+      if (!window.turnstile || TS.id !== null) return;
+      try { TS.id = window.turnstile.render(TS.box, { sitekey: TS.key, appearance: "interaction-only", callback: function (t) { TS.tok = t; TS.err = ""; }, "expired-callback": function () { TS.tok = ""; }, "error-callback": function (c) { TS.tok = ""; TS.err = String(c || "error"); return true; } }); } catch (e) { TS.err = "render"; }
+    }
+    function tsInit() {
+      if (TS.box) return;
+      TS.box = document.createElement("div"); TS.box.style.cssText = "margin:6px 0;min-height:0";
+      vField.parentNode.insertBefore(TS.box, vField.nextSibling);
+      if (window.turnstile) return tsEnsure();
+      window.__tsReady = tsEnsure;
+      var sc = document.createElement("script"); sc.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=__tsReady"; sc.async = true; sc.defer = true;
+      sc.onerror = function () { TS.err = "script"; };
+      document.head.appendChild(sc);
+    }
+    /* ننتظر التوكن حتى 20 ثانية (يتجدد تلقائيًا)؛ لو تأخر نعيد رسم الودجت مرة */
+    function tsWait() {
+      return new Promise(function (resolve) {
+        var t0 = Date.now(), retried = false;
+        (function poll() {
+          tsEnsure();
+          if (TS.tok) return resolve(TS.tok);
+          var dt = Date.now() - t0;
+          if (!retried && dt > 6000 && window.turnstile && TS.id !== null) { retried = true; try { window.turnstile.reset(TS.id); } catch (_) {} }
+          if (dt > 20000 || (TS.err === "script" && dt > 3000)) return resolve("");
+          setTimeout(poll, 250);
+        })();
+      });
+    }
+    function tsTake() { var t = TS.tok; TS.tok = ""; if (window.turnstile && TS.id !== null) { try { window.turnstile.reset(TS.id); } catch (_) {} } return t; }
+    function tsMsg(r, fallback) { return r && r.error === "captcha" ? "تعذّر التحقق من أنك لست روبوتًا" + (TS.err ? " (" + TS.err + ")" : "") + ". أعد تحميل الصفحة وحاول مرة أخرى." : (r.message || fallback); }
+    tsInit();
     function vRender() {
       var st = VF.state, ro = st === "sending" || st === "sent" || st === "verified";
       $("mailEmail").readOnly = ro; $("mailPass").readOnly = ro;
@@ -658,7 +688,7 @@ function _femaleSVG(size) {
       if (!regComplete()) { submitReg(); return; }
       if (VF.state === "sent") {
         VF.busy = true; var rg = VF.gen;
-        Promise.resolve().then(function () { if (rg !== VF.gen) return null; return invoke("startSignup", { email: VF.email }); }).then(function (r) {
+        tsWait().then(function () { if (rg !== VF.gen) return null; if (!TS.tok) return { status: "error", error: "captcha" }; return invoke("startSignup", { email: VF.email, ts: tsTake() }); }).then(function (r) {
           if (!r || rg !== VF.gen) return;
           VF.busy = false;
           if (r.status !== "sent") { if (r.status === "cooldown") vCooldown(); return setAlert("mailAlert", tsMsg(r, "تعذّر إرسال الرابط، حاول مرة أخرى.")); }
@@ -669,7 +699,7 @@ function _femaleSVG(size) {
       var em = $("mailEmail").value.trim().toLowerCase();
       if (!em || !EMAIL_RE.test(em)) { setAlert("mailAlert", "اكتب بريدًا إلكترونيًا صحيحًا."); markInvalid("mailEmail"); return; }
       VF.state = "sending"; VF.busy = true; vRender(); var sg = VF.gen;
-      Promise.resolve().then(function () { if (sg !== VF.gen) return null; return invoke("startSignup", { email: em }); }).then(function (r) {
+      tsWait().then(function () { if (sg !== VF.gen) return null; if (!TS.tok) return { status: "error", error: "captcha" }; return invoke("startSignup", { email: em, ts: tsTake() }); }).then(function (r) {
         if (!r || sg !== VF.gen) return;
         VF.busy = false;
         if (r.status === "sent") {
