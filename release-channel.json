@@ -1,8 +1,8 @@
 {
-  "epoch": 32,
-  "generation": "ace8547b4c820882d3a96006d4c141b7b14c26e7d5911b36adb5fa13683e094b",
-  "manifest": "manifests/ace8547b4c820882d3a96006d4c141b7b14c26e7d5911b36adb5fa13683e094b.json",
-  "manifestSHA256": "5708b077d7f10ead876f9bb97904889ad0479eca0837f34487614869f0de8415",
+  "epoch": 33,
+  "generation": "eb31a1caae1e94cd001c0ef9a44056ac869376a82c7af5653212c5d16b0765e3",
+  "manifest": "manifests/eb31a1caae1e94cd001c0ef9a44056ac869376a82c7af5653212c5d16b0765e3.json",
+  "manifestSHA256": "6ffeabba9d2c51f972d9fa84ac6666654eee9eaaed6907cd67200b0d07db7f90",
   "rollback": false,
   "schema": 1
 }

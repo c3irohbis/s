@@ -280,11 +280,19 @@ function _femaleSVG(size) {
     return p.then(function (r) { return r || { status: "error" }; }, function (e) { return { status: "error", message: (e && e.message) || "" }; });
   }
   /* بدون شاشة تحميل؛ ونتجاهل الضغطات المتكررة أثناء تنفيذ طلب جارٍ */
-  var inflight = false;
-  function call(method, payload) {
+  var inflight = false, busyEl = null, busyTimer = null;
+  function showBusy(msg) {
+    clearTimeout(busyTimer);
+    busyTimer = setTimeout(function () {
+      if (!busyEl) { busyEl = document.createElement("div"); busyEl.className = "av-busy"; busyEl.setAttribute("role", "status"); document.body.appendChild(busyEl); }
+      busyEl.textContent = msg || "جارٍ التنفيذ…"; busyEl.hidden = false; document.documentElement.classList.add("av-working");
+    }, 350);
+  }
+  function hideBusy() { clearTimeout(busyTimer); if (busyEl) busyEl.hidden = true; document.documentElement.classList.remove("av-working"); }
+  function call(method, payload, msg) {
     if (inflight) return new Promise(function () {});
-    inflight = true;
-    return invoke(method, payload).then(function (r) { inflight = false; return r; }, function (e) { inflight = false; throw e; });
+    inflight = true; showBusy(msg);
+    return invoke(method, payload).then(function (r) { inflight = false; hideBusy(); return r; }, function (e) { inflight = false; hideBusy(); throw e; });
   }
 
   /* حالة الواجهة فقط (مسودة التسجيل + تحقق البريد المعلّق) — تبقى بعد إغلاق الصفحة */
@@ -716,6 +724,7 @@ function _femaleSVG(size) {
       e.preventDefault(); clearAlert("cpAlert"); clearInvalid();
       var bad = function (msg, id) { setAlert("cpAlert", msg); markInvalid(id); };
       if (!$("cpName").value.trim()) return bad("اكتب اسم المستخدم.", "cpName");
+      if (!gender.cp.get()) { setAlert("cpAlert", "اختر نوع الحساب."); markInvalid("cpGender"); return; }
       if (!$("cpDept").value || !$("cpYear").value) { setAlert("cpAlert", "اختر الشعبة والفرقة لإكمال حسابك."); if (!$("cpDept").value) markInvalid("cpDept"); if (!$("cpYear").value) markInvalid("cpYear"); return; }
       if (!$("cpTerms").checked) return bad("يجب الموافقة على شروط الاستخدام وسياسة الخصوصية.", "cpTerms");
       profile = { name: $("cpName").value.trim(), gender: gender.cp.get(), dept: $("cpDept").value, year: $("cpYear").value, terms: true };
@@ -772,7 +781,7 @@ function _femaleSVG(size) {
   }
 
   function boot() {
-    gender.reg = makeGender($("regGender"), true); gender.cp = makeGender($("cpGender"));
+    gender.reg = makeGender($("regGender"), true); gender.cp = makeGender($("cpGender"), true);
     wireEyes(); wire(); enhanceSelects(); restoreDraft(); syncMethods();
     var rl = resetLink();
     if (rl) return rl.mode === "signup" ? startSignupLink(rl.code) : rl.mode === "verifyEmail" ? startVerifyLink(rl.code) : startReset(rl.code);
