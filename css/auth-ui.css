@@ -610,7 +610,7 @@ html.theme-light .av-google, html.theme-light .av-secondary { background: #fff; 
 .av-google.av-incomplete:hover { border-color: var(--border); background: rgba(255,255,255,.05); }
 html.theme-light .av-google.av-incomplete:hover { background: #fff; }
 /* حالة الخطأ لنوع الحساب وخانة الموافقة */
-#regGender.is-invalid .gender-seg-track { border-color: rgba(239,68,68,.7); box-shadow: 0 0 0 3px rgba(239,68,68,.12); }
+#regGender.is-invalid .gender-seg-track, #cpGender.is-invalid .gender-seg-track { border-color: rgba(239,68,68,.7); box-shadow: 0 0 0 3px rgba(239,68,68,.12); }
 .terms-check-label input[type="checkbox"].is-invalid { outline: 2px solid rgba(239,68,68,.85); outline-offset: 2px; border-radius: 3px; }
 /* نبض أحمر للحقول المطلوبة الناقصة عند الضغط على Google / البريد */
 @keyframes avPulse {
@@ -624,11 +624,11 @@ html.theme-light .av-google.av-incomplete:hover { background: #fff; }
 #viewRegister #loginName.is-invalid,
 #viewRegister .av-sel.is-invalid,
 #loginEmail.is-invalid, #loginPass.is-invalid,
-#regGender.is-invalid .gender-seg-track { animation: avPulse 1.4s ease-in-out infinite; }
+#regGender.is-invalid .gender-seg-track, #cpGender.is-invalid .gender-seg-track { animation: avPulse 1.4s ease-in-out infinite; }
 #agreeTermsCheck.is-invalid { animation: avPulseOutline 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   #viewRegister #loginName.is-invalid, #viewRegister .av-sel.is-invalid, #loginEmail.is-invalid, #loginPass.is-invalid,
-  #regGender.is-invalid .gender-seg-track, #agreeTermsCheck.is-invalid { animation: none; }
+  #regGender.is-invalid .gender-seg-track, #cpGender.is-invalid .gender-seg-track, #agreeTermsCheck.is-invalid { animation: none; }
 }
 /* نوع الحساب بدون اختيار */
 .gender-seg-thumb.none { opacity: 0; background: none; box-shadow: none; border-color: transparent; }
@@ -761,3 +761,9 @@ html:not(.theme-light) .fb .figure{fill:var(--text)}
 @keyframes fb-spin{from{transform:rotate(0deg) scale(.94)}to{transform:rotate(359deg) scale(.94)}}
 @keyframes fb-shake{0%{transform:rotate(-1deg)}50%{transform:rotate(2deg)}100%{transform:rotate(-1deg)}}
 @keyframes fb-flash{0%{opacity:.4}100%{opacity:0}}
+
+/* حالة التحميل + إخفاء التنبيه الفارغ */
+.av-alert[hidden] { display: none !important; }
+.av-busy { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 100000; padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 700; background: rgba(20,20,30,.92); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+.av-busy[hidden] { display: none !important; }
+.av-working #page-login button[type="submit"], .av-working .av-screen button[type="submit"], .av-working #mainAuthBtn { opacity: .6; pointer-events: none; cursor: progress; }
