@@ -391,7 +391,7 @@ const suMsg = (e) => SU_MSG[e] || (e === "network" ? "تعذّر الاتصال.
 B.startSignup = async function ({ email, ts }) {
   const r = await signupCall("start", { email: String(email || "").trim().toLowerCase(), ts: ts || "" });
   if (r.ok) return { status: "sent" };
-  return { status: r.error === "cooldown" ? "cooldown" : "error", message: suMsg(r.error) };
+  return { status: r.error === "cooldown" ? "cooldown" : "error", error: r.error, message: suMsg(r.error) };
 };
 B.peekSignup = async function ({ token }) {
   const r = await signupCall("peek", { token });
