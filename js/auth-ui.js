@@ -234,7 +234,7 @@ function _femaleSVG(size) {
       if (e.key === "Escape") { e.preventDefault(); close(); }
       else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); var bs = [].slice.call(list.children), i = bs.indexOf(document.activeElement); bs[Math.max(0, Math.min(bs.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))].focus(); }
     });
-    ["regDept", "regYear", "cpDept", "cpYear"].forEach(function (id) {
+    ["regDept", "regYear", "cpDept", "cpYear", "rpDept", "rpYear"].forEach(function (id) {
       var sel = $(id); if (!sel) return;
       var items = [].slice.call(sel.options).filter(function (op) { return op.value; }).map(function (op) { return { value: op.value, text: op.textContent.trim() }; });
       var ph = sel.options[0] ? sel.options[0].textContent.trim() : "";
@@ -460,15 +460,45 @@ function _femaleSVG(size) {
     if (sub) sub.textContent = signup ? "تم التحقق من بريدك. اختر كلمة مرور لإكمال إنشاء حسابك." : "تم التحقق من بريدك. اختر كلمة مرور جديدة.";
     $("rpSave").textContent = signup ? "إنشاء الحساب" : "حفظ كلمة المرور";
   }
+  /* صفحة الرابط: كلمة المرور دايمًا، وباقي البيانات بس لو ناقصة من مسودة التسجيل (مثلًا الرابط اتفتح على جهاز/متصفح تاني) */
+  function draftMissing(d) {
+    d = d || {};
+    return { name: !String(d.name || "").trim(), gender: d.gender !== "male" && d.gender !== "female", dept: !d.dept, year: !d.year, terms: !d.terms };
+  }
+  function showRpProfile(on) {
+    var box = $("rpProfile"); if (!box) return;
+    var m = on ? draftMissing(S.draft) : { name: false, gender: false, dept: false, year: false, terms: false };
+    $("rpNameF").hidden = !m.name; $("rpGenderF").hidden = !m.gender; $("rpDeptYear").hidden = !(m.dept || m.year); $("rpTermsRow").hidden = !m.terms;
+    box.hidden = !(m.name || m.gender || m.dept || m.year || m.terms);
+    ["rpName", "rpDept", "rpYear"].forEach(function (id) { $(id).value = ""; }); $("rpTerms").checked = false;
+    var sub = document.querySelector("#screenReset .av-sub");
+    if (on && sub) sub.textContent = box.hidden ? "تم التحقق من بريدك. اختر كلمة مرور لإنشاء حسابك والدخول للموقع." : "تم التحقق من بريدك. كمّل البيانات الناقصة واختر كلمة مرور، وهندخلك الموقع على طول.";
+  }
+  function rpCollect() {
+    var d = S.draft || {}, m = draftMissing(d), out = { name: d.name || "", gender: d.gender, dept: d.dept || "", year: d.year || "", terms: !!d.terms };
+    if (m.name) out.name = $("rpName").value.trim();
+    if (m.gender) out.gender = gender.rp.get();
+    if (m.dept) out.dept = $("rpDept").value;
+    if (m.year) out.year = $("rpYear").value;
+    if (m.terms) out.terms = $("rpTerms").checked;
+    return out;
+  }
+  function rpProblem(o) {
+    if (!o.name) return ["اكتب اسم المستخدم.", ["rpName"]];
+    if (o.gender !== "male" && o.gender !== "female") return ["اختر نوع الحساب.", ["rpGender"]];
+    if (!o.dept || !o.year) return ["اختر الشعبة والفرقة.", [o.dept ? null : "rpDept", o.year ? null : "rpYear"].filter(Boolean)];
+    if (!o.terms) return ["يجب الموافقة على شروط الاستخدام وسياسة الخصوصية.", ["rpTerms"]];
+    return null;
+  }
   function startSignupLink(token) {
     call("peekSignup", { token: token }, "جارٍ التحقق من الرابط…").then(function (r) {
-      if (r.status === "ok") { suToken = token; rpCode = null; rpEmail = r.email || ""; setResetMode(true); return go("reset"); }
+      if (r.status === "ok") { suToken = token; rpCode = null; rpEmail = r.email || ""; setResetMode(true); showRpProfile(true); return go("reset"); }
       suToken = null; endReset(); go("login");
       setAlert("loginAlert", r.message || "الرابط غير صالح أو انتهت صلاحيته. اطلب رابطًا جديدًا من شاشة إنشاء الحساب.");
     });
   }
   function startReset(code) {
-    setResetMode(false); suToken = null;
+    setResetMode(false); suToken = null; showRpProfile(false);
     if (!FORGOT_ENABLED) { go("login"); setAlert("loginAlert", FORGOT_OFF_MSG); return; }
     rpCode = code; rpEmail = ""; $("rpPass").value = ""; $("rpPass2").value = "";
     call("checkResetCode", { code: code }, "جارٍ التحقق من الرابط…").then(function (r) {
@@ -549,7 +579,9 @@ function _femaleSVG(size) {
       if (p1.length < 6) { setAlert("rpAlert", "كلمة المرور يجب ألا تقل عن 6 أحرف."); markInvalid("rpPass"); return; }
       if (p1 !== p2) { setAlert("rpAlert", "كلمتا المرور غير متطابقتين."); markInvalid("rpPass2"); return; }
       if (suToken) {
-        var tk = suToken;
+        var tk = suToken, pf = rpCollect(), pb = rpProblem(pf);
+        if (pb) { setAlert("rpAlert", pb[0]); markInvalid.apply(null, pb[1]); return; }
+        S.draft = pf; save();
         return call("completeSignup", { token: tk, password: p1 }, "جارٍ إنشاء حسابك…").then(function (r) {
           if (r.status === "ok") {
             suToken = null; $("rpPass").value = ""; $("rpPass2").value = "";
@@ -781,7 +813,7 @@ function _femaleSVG(size) {
   }
 
   function boot() {
-    gender.reg = makeGender($("regGender"), true); gender.cp = makeGender($("cpGender"), true);
+    gender.reg = makeGender($("regGender"), true); gender.cp = makeGender($("cpGender"), true); gender.rp = makeGender($("rpGender"), true);
     wireEyes(); wire(); enhanceSelects(); restoreDraft(); syncMethods();
     var rl = resetLink();
     if (rl) return rl.mode === "signup" ? startSignupLink(rl.code) : rl.mode === "verifyEmail" ? startVerifyLink(rl.code) : startReset(rl.code);

@@ -767,3 +767,7 @@ html:not(.theme-light) .fb .figure{fill:var(--text)}
 .av-busy { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 100000; padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 700; background: rgba(20,20,30,.92); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
 .av-busy[hidden] { display: none !important; }
 .av-working #page-login button[type="submit"], .av-working .av-screen button[type="submit"], .av-working #mainAuthBtn { opacity: .6; pointer-events: none; cursor: progress; }
+#rpProfile[hidden], #rpProfile [hidden] { display: none !important; }
+#rpProfile { display: flex; flex-direction: column; gap: 12px; }
+#rpGender.is-invalid .gender-seg-track { border-color: rgba(239,68,68,.7); box-shadow: 0 0 0 3px rgba(239,68,68,.12); }
+#rpTerms.is-invalid { outline: 2px solid rgba(239,68,68,.85); outline-offset: 2px; border-radius: 3px; }

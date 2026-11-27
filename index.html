@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 
 <html dir="rtl" lang="ar">
-<head><base href="/s/release/eb31a1caae1e94cd001c0ef9a44056ac869376a82c7af5653212c5d16b0765e3/"/>
+<head><base href="/s/release/01bf2830091b3a0f08a07c87d3c3c5cb667c8b14e9cd6579f452d8bd1e619457/"/>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" name="viewport"/>
 <title>منتدى الجامعة</title>
@@ -26,10 +26,10 @@
      يستخدم الرابط الحقيقي فعلاً. -->
 <script type="importmap">{
   "imports": {
-    "./js/app/p-content-loaders-forum.js": "/s/forum-feed.js?v=9960f0e09c37",
+    "./js/app/p-content-loaders-forum.js": "/s/forum-feed.js?v=61dd893ec688",
     "./js/firestore-safe.js": "./js/firestore-safe.js?v=prefs-1",
     "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js": "./js/firestore-safe.js?v=prefs-1",
-    "./js/notif-permission.js": "/s/notification-permission.js?v=c509dfa75b59"
+    "./js/notif-permission.js": "/s/notification-permission.js?v=3a800f1c46b5"
   },
   "scopes": {
     "./js/firestore-safe.js?v=prefs-1": {
@@ -122,7 +122,7 @@
 <script defer="" src="js/mydocs-client.js"></script>
 <script src="js/attendance-config.js"></script>
 <script defer="" src="js/attendance-client.js"></script>
-<meta content="e998238b5348478345fa393beae7d3b0e069599bb58d0da17cce0a6d51a9802a" name="bis-release"/></head>
+<meta content="d6a203b45fcd3cb01a665b9c791f533c89ec391e4e0944c1d2e95bf054c3f86c" name="bis-release"/></head>
 <body>
 <!-- ══ شاشة التحميل الحديثة (Splash Screen) — أول حاجة في body، عشان تظهر
      فورًا فوق أي محتوى تاني وهو لسه بيتحمل، بدل شاشة بدائية منفصلة ══ -->
@@ -314,6 +314,16 @@
 <p class="av-sub">تم التحقق من بريدك. اختر كلمة مرور جديدة.</p>
 <div class="av-email-chip" dir="ltr" id="rpEmail"></div>
 <form class="av-form" id="rpForm" novalidate="">
+<div hidden="" id="rpProfile">
+<div class="av-field" id="rpNameF"><input autocomplete="off" class="inp" id="rpName" placeholder="اسم المستخدم" spellcheck="false"/></div>
+<div id="rpGenderF"><div class="gender-row show" id="rpGender"></div></div>
+<div class="av-grid2 av-dy" id="rpDeptYear">
+<select class="inp" id="rpDept"><option disabled="" selected="" value="">الشعبة</option><option value="is">نظم المعلومات</option><option value="lt">اللغات والترجمة</option><option value="th">سياحة وفنادق</option><option value="ba">علوم إدارية</option></select>
+<span aria-hidden="true" class="av-vsep"></span>
+<select class="inp" id="rpYear"><option disabled="" selected="" value="">الفرقة</option><option value="1">الأولى</option><option value="2">الثانية</option><option value="3">الثالثة</option><option value="4">الرابعة</option></select>
+</div>
+<div class="terms-row av-terms" id="rpTermsRow"><label class="terms-check-label"><input id="rpTerms" type="checkbox"/><span>أوافق على <b>شروط الاستخدام</b> و<b>سياسة الخصوصية</b> <a class="terms-read-link" href="terms.html" rel="noopener" target="_blank">اقرأ الشروط</a></span></label></div>
+</div>
 <div class="av-field av-pass"><input autocomplete="new-password" class="inp" id="rpPass" placeholder="كلمة المرور الجديدة (6 أحرف على الأقل)" type="password"/><button aria-label="إظهار كلمة المرور" aria-pressed="false" class="av-eye" data-eye="rpPass" type="button"></button></div>
 <div class="av-field av-pass"><input autocomplete="new-password" class="inp" id="rpPass2" placeholder="تأكيد كلمة المرور الجديدة" type="password"/><button aria-label="إظهار كلمة المرور" aria-pressed="false" class="av-eye" data-eye="rpPass2" type="button"></button></div>
 <div class="av-alert" hidden="" id="rpAlert"></div>
