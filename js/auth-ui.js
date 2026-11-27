@@ -310,7 +310,7 @@ function _femaleSVG(size) {
   function restoreDraft() { var d = S.draft; if (!d) return; $("loginName").value = d.name || ""; if (d.gender) gender.reg.set(d.gender); $("regDept").value = d.dept || ""; $("regYear").value = d.year || ""; $("agreeTermsCheck").checked = !!d.terms; }
   function prefillComplete() {
     var u = profile; if (!u) return;
-    $("cpName").value = u.name || ""; if (u.gender) gender.cp.set(u.gender); $("cpDept").value = u.dept || ""; $("cpYear").value = u.year || ""; $("cpTerms").checked = !!u.terms;
+    $("cpName").value = u.name || ""; if (u.gender) gender.cp.set(u.gender); else gender.cp.clear(); $("cpDept").value = u.dept || ""; $("cpYear").value = u.year || ""; $("cpTerms").checked = !!u.terms;
     /* نعرض الخانات الناقصة بس (لو مفيش ناقص نعرض الكل) */
     var m = draftMissing({ name: u.name, gender: u.gender, dept: u.dept, year: u.year, terms: u.terms });
     var any = m.name || m.gender || m.dept || m.year || m.terms; if (!any) m = { name: true, gender: true, dept: true, year: true, terms: true };
@@ -381,7 +381,8 @@ function _femaleSVG(size) {
       thumb.className = "gender-seg-thumb " + (g === "male" ? "male-active" : "female-active");
     }
     m.onclick = function () { set("male"); }; f.onclick = function () { set("female"); };
-    return { set: set, get: function () { return cur; } };
+    function clear() { cur = null; paint(null); m.className = "gender-seg-opt"; f.className = "gender-seg-opt"; thumb.className = "gender-seg-thumb none"; host.classList.remove("is-invalid"); }
+    return { set: set, get: function () { return cur; }, clear: clear };
   }
 
   /* ══ المصباح ══ */
