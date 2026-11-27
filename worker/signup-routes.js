@@ -133,6 +133,9 @@ async function authTakeover(env, f, uid, password) {
   if (!r.ok) throw Error('auth-update');
 }
 
+// Bot check switch: Turnstile is OFF by the owner's decision when false; the per-email/IP/global limits still apply.
+let BOT_CHECK = false;
+export function _setBotCheck(v) { BOT_CHECK = !!v; }
 export async function handleSignup(request, env, { rpc, fetch: rawFetch = fetch, ip = '', waitUntil }) {
   const f = withTimeout(rawFetch);
   if (request.method !== 'POST') return reply(405, { error: 'method' });
@@ -144,18 +147,20 @@ export async function handleSignup(request, env, { rpc, fetch: rawFetch = fetch,
     if (route === '/v1/signup/start') {
       const email = normEmail(body.email);
       if (!validEmail(email)) return reply(400, { error: 'invalid-email' });
+      const diag = (o, d) => { try { const p = rpc('signup_diag', { p_outcome: o, p_detail: d || '' }).catch(() => {}); if (waitUntil) waitUntil(p); } catch (_) {} };
       // Bot check (Cloudflare Turnstile), fail-closed once configured. Runs before any quota is spent.
-      {
+      if (BOT_CHECK) {
         if (!env.TURNSTILE_SECRET) return reply(503, { error: 'unavailable' });
         const tk = typeof body.ts === 'string' ? body.ts : '';
-        if (!tk || tk.length > 2048) return reply(400, { error: 'captcha' });
+        if (!tk || tk.length > 2048) { diag('no-token', typeof body.ce === 'string' && /^[A-Za-z0-9_-]{1,24}$/.test(body.ce) ? body.ce : ''); return reply(400, { error: 'captcha' }); }
         let ok = false;
         try {
           const vr = await f('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret: env.TURNSTILE_SECRET, response: tk, remoteip: ip || undefined }) });
-          const vj = await vr.json(); ok = !!(vj && vj.success === true && vj.hostname === 'c3irohbis.github.io');
+          const vj = await vr.json(); ok = !!(vj && vj.success === true && vj.hostname === 'c3irohbis.github.io'); if (!ok) diag('bad-token', (vj && Array.isArray(vj['error-codes']) ? vj['error-codes'].join(',') : '') + (vj && vj.success && vj.hostname !== 'c3irohbis.github.io' ? ' host-mismatch' : ''));
         } catch (_) { return reply(503, { error: 'unavailable' }); }
         if (!ok) return reply(400, { error: 'captcha' });
       }
+      if (BOT_CHECK) diag('token-ok', '');
       // System-level check first (same for every address): can we send mail at all?
       try { await gmailToken(env, f); } catch (_) { return reply(503, { error: 'send-failed' }); }
       const raw = crypto.getRandomValues(new Uint8Array(32)); const token = b64url(raw);
