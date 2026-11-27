@@ -253,9 +253,12 @@ B.google = async function (draft) {
   }
 };
 
-B.sendEmailLink = async function ({ email, password, profile }) {
-  const site = toSite(profile), bad = validSite(site);
-  if (bad) return { status: "error", message: bad };
+/* مرحلة 1: إنشاء حساب غير مفعّل + إرسال رابط التحقق. لا وثيقة مستخدم هنا، والموقع يبقى محجوزًا. */
+let provisionedUid = null;   /* حساب اكتمل إنشاؤه: الإلغاء المتأخر لا يلمسه */
+let vChain = Promise.resolve();   /* تسلسل إنشاء/إلغاء جلسة التحقق: الإلغاء ينتظر الإنشاء الجاري */
+const serial = (fn) => (arg) => { const r = vChain.then(() => fn(arg)); vChain = r.catch(() => {}); return r; };
+B.sendVerification = serial(async function ({ email, password }) {
+  provisionedUid = null;   /* بداية دورة تسجيل جديدة */
   busy = true;
   try {
     let cred;
@@ -263,18 +266,65 @@ B.sendEmailLink = async function ({ email, password, profile }) {
       cred = await createUserWithEmailAndPassword(auth(), email, password);
     } catch (e) {
       if (e.code !== "auth/email-already-in-use") throw e;
-      /* حساب يتيم من محاولة سابقة (كلمة المرور صحيحة ولا توجد وثيقة): نكمل عليه */
       let existing;
       try { existing = await signInWithEmailAndPassword(auth(), email, password); }
       catch (_) { busy = false; return { status: "exists" }; }
       if (await userDoc(existing.user.uid)) { await signOut(auth()); busy = false; return { status: "exists" }; }
       cred = existing;
     }
-    /* بدون رابط تحقق: ننشئ وثيقة المستخدم فورًا ويُفتح الموقع */
-    const created = await ensureProfile(cred.user, site);
+    if (cred.user.emailVerified) return { status: "verified" };
+    try { await sendEmailVerification(cred.user); }
+    catch (e) {
+      /* الحساب اتعمل لكن الرسالة فشلت: نقفل الجلسة غير المفعّلة قبل ما نرفع الحجز */
+      try { await signOut(auth()); } catch (_) { return { status: "error", message: errMsg(e) }; }   /* الحجز يبقى لو فشل الإغلاق */
+      busy = false; return { status: "error", message: errMsg(e) };
+    }
+    return { status: "sent" };
+  } catch (e) {
+    /* أي فشل بعد نجاح الدخول: نُغلق الجلسة التي أنشأتها هذه العملية قبل رفع الحجز */
+    try { if (auth().currentUser) await signOut(auth()); }
+    catch (_) { return { status: "error", cleanup: true, message: errMsg(e) }; }
+    busy = false; return { status: "error", message: errMsg(e) };
+  }
+});
+/* فحص هادئ أثناء الانتظار: reload + توكن جديد (بدون أي قراءة Firestore) */
+B.pollVerified = async function () {
+  const u = auth().currentUser;
+  if (!u) return { status: "error", message: SESSION_GONE };
+  try {
+    await u.reload();
+    if (!u.emailVerified) return { status: "pending" };
+    await u.getIdToken(true);
+    return { status: "verified" };
+  } catch (e) { return { status: "error", message: errMsg(e) }; }
+};
+/* تغيير البريد أو إلغاء التحقق: نترك الجلسة غير المفعّلة */
+B.cancelVerification = serial(async function () {
+  /* شاشة التسجيل ليس فيها جلسة مشروعة: نُنهي أي جلسة (مفعّلة أو لا) ثم نرفع الحجز */
+  try {
+    const cu = auth().currentUser;
+    if (cu && cu.uid === provisionedUid) return { status: "ok" };
+    if (cu) await signOut(auth());
+    busy = false;
+    return { status: "ok" };
+  } catch (e) { return { status: "error", message: errMsg(e) }; }
+});
+
+/* مرحلة 2: إنشاء الحساب لا يتم إلا بعد التحقق من نفس البريد (والخادم يرفض أي توكن غير مفعّل أيضًا) */
+B.sendEmailLink = serial(async function ({ email, profile }) {
+  const site = toSite(profile), bad = validSite(site);
+  if (bad) return { status: "error", message: bad };
+  const u = auth().currentUser;
+  if (!u || !u.emailVerified || String(u.email || "").toLowerCase() !== String(email || "").toLowerCase())
+    return { status: "error", message: "تحقق من بريدك الإلكتروني أولًا" };
+  busy = true;
+  try {
+    await u.getIdToken(true);
+    const created = await ensureProfile(u, site);
+    provisionedUid = u.uid;
     return { status: "ok", profile: toUi(created) };
   } catch (e) { busy = false; return { status: "error", message: errMsg(e) }; }
-};
+});
 
 /* نسيت كلمة المرور: Firebase يرسل رابط إعادة الضبط للبريد.
    لا نكشف إن كان البريد مسجّلًا أم لا (نفس الرد دائمًا) لمنع تخمين الحسابات. */
@@ -336,6 +386,8 @@ B.saveProfile = async function (profile) {
   if (!u) return { status: "error", message: SESSION_GONE };
   const site = toSite(profile), bad = validSite(site);
   if (bad) return { status: "error", message: bad };
+  if (!u.emailVerified && u.providerData.some(function (x) { return x.providerId === "password"; }))
+    return { status: "error", message: "تحقق من بريدك الإلكتروني أولًا" };
   try { await ensureProfile(u, site); return { status: "ok" }; }
   catch (e) { return { status: "error", message: "تعذّر حفظ بياناتك، تأكد من الاتصال وحاول تاني" }; }
 };
