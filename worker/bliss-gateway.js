@@ -1195,8 +1195,8 @@ export default {
     if (isHealth) return ok(request, env, { ok: true }, { complete: true, count: 0, generatedAt: Date.now() }, { "Cache-Control": "no-store" });
 
     // تسجيل بريد بلا حساب Auth قبل الضغط على الرابط: مسارات عامة (بلا توكن) بحد معدل أضيق لكل IP
-    if (url.pathname === "/v1/signup/start" || url.pathname === "/v1/signup/peek" || url.pathname === "/v1/signup/complete") {
-      if (!rateLimit("su:" + ip, url.pathname === "/v1/signup/start" ? 5 : 20)) return err(request, env, 429, "rate-limited");
+    if (url.pathname === "/v1/signup/start" || url.pathname === "/v1/signup/peek" || url.pathname === "/v1/signup/complete" || url.pathname === "/v1/signup/confirm" || url.pathname === "/v1/signup/status") {
+      if (!rateLimit("su:" + ip + (url.pathname === "/v1/signup/status" ? ":st" : ""), url.pathname === "/v1/signup/start" ? 5 : url.pathname === "/v1/signup/status" ? 40 : 20)) return err(request, env, 429, "rate-limited");
       const response = await handleSignup(request, env, { ip, waitUntil: (p) => ctx.waitUntil(p), rpc: async (name, body) => {
         const r = await sb(env, "/rpc/" + name, { method: "POST", body });
         if (!r.ok) throw Error("signup-backend");

@@ -195,3 +195,42 @@ test('bot check can be switched off: the mail is sent without a token and limits
   try { const r = await run('/v1/signup/start', { email: 'a@b.com', ts: '' }); assert.equal(r.status, 200); assert.equal(r.log.sent.length, 1); assert.ok(r.log.rpc.some((c) => c[0] === 'signup_start')); }
   finally { mod._setBotCheck(true); }
 });
+
+const H64 = 'a'.repeat(64), HND = 'B'.repeat(43);
+test('start stores only a hash of the handle and sends no extra data; invalid ph is ignored', async () => {
+  const x = await run('/v1/signup/start', { email: 'a@example.com', ts: 'good', ph: H64 });
+  assert.equal(x.status, 200); assert.equal(x.log.rpc.find(r => r[0] === 'signup_start')[1].p_poll, H64);
+  const y = await run('/v1/signup/start', { email: 'a@example.com', ts: 'good', ph: 'not-hex' });
+  assert.equal('p_poll' in y.log.rpc.find(r => r[0] === 'signup_start')[1], false);
+});
+test('with a handle, an already registered address is not revealed: the row is kept, not finished', async () => {
+  const x = await run('/v1/signup/start', { email: 'a@example.com', ts: 'good', ph: H64 }, { existing: true });
+  assert.equal(x.status, 200); assert.equal(x.log.sent.length, 0); assert.equal(x.log.rpc.some(r => r[0] === 'signup_finish'), false);
+});
+test('confirm marks the row only; status and complete need the secret handle', async () => {
+  const c = await run('/v1/signup/confirm', { token: TOK }, { db: { signup_confirm: () => ({ ok: true, poll: true }) } });
+  assert.equal(c.status, 200); assert.deepEqual(c.json, { ok: true, poll: true });
+  assert.equal(c.log.created.length, 0);
+  const bad = await run('/v1/signup/confirm', { token: 'short' }); assert.equal(bad.status, 400); assert.equal(bad.log.rpc.length, 0);
+  const st = await run('/v1/signup/status', { handle: HND }, { db: { signup_status: () => ({ state: 'confirmed' }) } });
+  assert.deepEqual(st.json, { ok: true, state: 'confirmed' });
+  assert.match(st.log.rpc.find(r => r[0] === 'signup_status')[1].p_poll, /^[0-9a-f]{64}$/);
+  assert.notEqual(st.log.rpc.find(r => r[0] === 'signup_status')[1].p_poll, HND);
+  const odd = await run('/v1/signup/status', { handle: HND }, { db: { signup_status: () => ({ state: 'whatever' }) } });
+  assert.deepEqual(odd.json, { ok: true, state: 'invalid' });
+  const no = await run('/v1/signup/status', { handle: 'x' }); assert.equal(no.status, 400);
+});
+test('complete by handle consumes only through the handle, creates the account with the given password and finishes by the row hash', async () => {
+  const x = await run('/v1/signup/complete', { handle: HND, password: 'secret12' }, { db: { signup_consume_poll: () => ({ email: 'a@example.com', hash: 'c'.repeat(64) }) } });
+  assert.equal(x.status, 200); assert.equal(x.log.created.length, 1); assert.equal(x.log.created[0].password, 'secret12');
+  assert.equal(x.log.rpc.some(r => r[0] === 'signup_consume'), false);
+  assert.deepEqual(x.log.rpc.find(r => r[0] === 'signup_finish')[1], { p_hash: 'c'.repeat(64) });
+  const none = await run('/v1/signup/complete', { handle: HND, password: 'secret12' }, { db: { signup_consume_poll: () => ({ error: 'invalid' }) } });
+  assert.equal(none.status, 400); assert.equal(none.log.created.length, 0);
+  const weak = await run('/v1/signup/complete', { handle: HND, password: '123' }); assert.equal(weak.status, 400); assert.equal(weak.log.rpc.length, 0);
+  const bad = await run('/v1/signup/complete', { handle: 'short', password: 'secret12' }); assert.equal(bad.status, 400);
+});
+test('token path of complete is unchanged', async () => {
+  const x = await run('/v1/signup/complete', { token: TOK, password: 'secret12' }, { db: { signup_consume: () => ({ email: 'a@example.com' }) } });
+  assert.equal(x.status, 200); assert.equal(x.log.rpc.some(r => r[0] === 'signup_consume_poll'), false);
+});
