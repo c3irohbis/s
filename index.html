@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 
 <html dir="rtl" lang="ar">
-<head><base href="/s/release/7d378ef05b7c630899f60f8adee96a5bfb031d5e487a1c3829835730b6def21b/"/>
+<head><base href="/s/release/575a1d22172f37e14e186ea282054c99ecde241ba354051668f5cb4d63fd2981/"/>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" name="viewport"/>
 <title>منتدى الجامعة</title>
@@ -26,10 +26,10 @@
      يستخدم الرابط الحقيقي فعلاً. -->
 <script type="importmap">{
   "imports": {
-    "./js/app/p-content-loaders-forum.js": "/s/forum-feed.js?v=d97e8b68ac55",
+    "./js/app/p-content-loaders-forum.js": "/s/forum-feed.js?v=c08700d32f46",
     "./js/firestore-safe.js": "./js/firestore-safe.js?v=prefs-1",
     "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js": "./js/firestore-safe.js?v=prefs-1",
-    "./js/notif-permission.js": "/s/notification-permission.js?v=315bdd5831bb"
+    "./js/notif-permission.js": "/s/notification-permission.js?v=675ab831c30d"
   },
   "scopes": {
     "./js/firestore-safe.js?v=prefs-1": {
@@ -122,7 +122,7 @@
 <script defer="" src="js/mydocs-client.js"></script>
 <script src="js/attendance-config.js"></script>
 <script defer="" src="js/attendance-client.js"></script>
-<meta content="495492db54db12d34a47616b0ccad5d4f8fca4a1e87795ab7bd6379887e4dfed" name="bis-release"/></head>
+<meta content="66ca1393685a000b7ff3d22bcb73a44e3584a0aefb483ee895b4199defd35e11" name="bis-release"/></head>
 <body>
 <!-- ══ شاشة التحميل الحديثة (Splash Screen) — أول حاجة في body، عشان تظهر
      فورًا فوق أي محتوى تاني وهو لسه بيتحمل، بدل شاشة بدائية منفصلة ══ -->
@@ -305,6 +305,21 @@
 <button class="btn" id="fpSend" type="submit">إرسال رابط التحقق</button>
 </form>
 <button class="av-link av-center" id="fpBack" type="button">رجوع لتسجيل الدخول</button>
+</div>
+</div>
+<!-- تم تأكيد البريد: صفحة الرابط عند فتحه من متصفح غير اللي بدأ التسجيل. تأكيد فقط، والمتصفح الأول يكمّل لوحده -->
+<div class="av-screen" hidden="" id="screenConfirmed">
+<div class="av-card av-center-card">
+<div aria-hidden="true" class="av-badge">
+<svg fill="none" height="42" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" viewbox="0 0 24 24" width="42"><rect height="14" rx="3" width="18" x="3" y="5"></rect><path d="M3.5 7.5l8.5 6 8.5-6"></path></svg>
+<span class="av-badge-dot"><svg fill="none" height="14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" viewbox="0 0 24 24" width="14"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+</div>
+<h1 class="av-h1">تم التأكيد ✓</h1>
+<p class="av-sub">ارجع للمتصفح اللي بدأت منه التسجيل وهيدخلك الموقع تلقائيًا.</p>
+<div hidden="" id="cfFallback">
+<p class="av-sub">مش قادر ترجع لنفس المتصفح؟</p>
+<button class="av-link av-center" id="cfContinue" type="button">كمّل التسجيل من هنا</button>
+</div>
 </div>
 </div>
 <!-- استعادة كلمة المرور: كلمة مرور جديدة بعد نجاح التحقق -->

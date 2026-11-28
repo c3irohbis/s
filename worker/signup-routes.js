@@ -11,6 +11,7 @@ const hex = (bytes) => [...new Uint8Array(bytes)].map(b => b.toString(16).padSta
 export const sha256hex = async (s) => hex(await crypto.subtle.digest('SHA-256', enc.encode(s)));
 export const normEmail = (e) => (typeof e === 'string' ? e.trim().toLowerCase() : '');
 export const validEmail = (e) => typeof e === 'string' && e.length <= 254 && EMAIL_RE.test(e);
+export const validHex64 = (t) => typeof t === 'string' && /^[0-9a-f]{64}$/.test(t);
 export const validToken = (t) => typeof t === 'string' && /^[A-Za-z0-9_-]{43}$/.test(t);
 
 const safeBase = (b) => (typeof b === 'string' && /^https:\/\/[a-z0-9.-]+\/[A-Za-z0-9_.\/-]*$/.test(b)) ? b : LINK_BASE_DEFAULT;
@@ -78,14 +79,14 @@ export function buildMessage(to, link, fromAddr) {
   const text = [
     'مرحبًا،', '',
     'وصلنا طلب لإنشاء حساب في منتدى الجامعة بهذا البريد الإلكتروني (' + to + ').', '',
-    'لإكمال إنشاء الحساب وتحديد كلمة المرور، افتح هذا الرابط:', link, '',
+    'لتأكيد بريدك وإكمال إنشاء الحساب، افتح هذا الرابط، ثم ارجع للمتصفح اللي بدأت منه التسجيل:', link, '',
     'الرابط صالح لمدة 30 دقيقة ويُستخدم مرة واحدة فقط.', '',
     'إذا لم تطلب إنشاء حساب، تجاهل هذه الرسالة. لن يُنشأ أي حساب ولن يُحفظ أي شيء، ويُحذف الطلب تلقائيًا.', '',
     'منتدى الجامعة'].join('\r\n');
   const html = '<!DOCTYPE html><html lang="ar" dir="rtl"><body style="margin:0;padding:16px;background:#ffffff"><div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;font-size:15px;line-height:1.9;color:#222;max-width:520px">'
     + '<p>مرحبًا،</p>'
     + '<p>وصلنا طلب لإنشاء حساب في منتدى الجامعة بهذا البريد الإلكتروني (<span dir="ltr">' + escHtml(to) + '</span>).</p>'
-    + '<p>لإكمال إنشاء الحساب وتحديد كلمة المرور، اضغط على الزر:</p>'
+    + '<p>لتأكيد بريدك وإكمال إنشاء الحساب، اضغط على الزر، ثم ارجع للمتصفح اللي بدأت منه التسجيل:</p>'
     + '<p><a href="' + escHtml(link) + '" style="background:#2563eb;color:#ffffff;padding:10px 22px;border-radius:8px;text-decoration:none;display:inline-block">إكمال إنشاء الحساب</a></p>'
     + '<p style="color:#555;font-size:13px">أو انسخ هذا الرابط في المتصفح:<br><a href="' + escHtml(link) + '" dir="ltr" style="color:#555;word-break:break-all">' + escHtml(link) + '</a></p>'
     + '<p style="color:#555;font-size:13px">الرابط صالح لمدة 30 دقيقة ويُستخدم مرة واحدة فقط.<br>إذا لم تطلب إنشاء حساب، تجاهل هذه الرسالة. لن يُنشأ أي حساب ولن يُحفظ أي شيء، ويُحذف الطلب تلقائيًا.</p>'
@@ -166,7 +167,8 @@ export async function handleSignup(request, env, { rpc, fetch: rawFetch = fetch,
       const raw = crypto.getRandomValues(new Uint8Array(32)); const token = b64url(raw);
       const hash = await sha256hex(token);
       // Durable quotas run before any account lookup, so every address gets the same answer.
-      const s = await rpc('signup_start', { p_email: email, p_hash: hash, p_ip: ip ? (await sha256hex('ip:' + ip)).slice(0, 32) : '', p_ttl: 1800 });
+      const ph = validHex64(body.ph) ? body.ph : '';   // sha256 of a random handle kept in the starting browser's memory (never the handle itself)
+      const s = await rpc('signup_start', { p_email: email, p_hash: hash, p_ip: ip ? (await sha256hex('ip:' + ip)).slice(0, 32) : '', p_ttl: 1800, ...(ph ? { p_poll: ph } : {}) });
       if (s && s.error === 'cooldown') return reply(429, { error: 'cooldown' });
       if (s && (s.error === 'limit' || s.error === 'busy')) return reply(429, { error: 'rate-limited' });
       if (!s || !s.ok) return reply(503, { error: 'unavailable' });
@@ -175,7 +177,7 @@ export async function handleSignup(request, env, { rpc, fetch: rawFetch = fetch,
         try {
           const u = await authLookup(env, f, email);
           // A verified (or social) account exists: send nothing. An unverified password-only squat is not a reason to block the real owner.
-          if (u && (u.verified || !u.passwordOnly)) { await rpc('signup_finish', { p_hash: hash }); return; }
+          if (u && (u.verified || !u.passwordOnly)) { if (!ph) await rpc('signup_finish', { p_hash: hash }); return; }   // with a handle the row just expires, so the poll answer does not reveal a registered address
           await sendMail(env, f, email, base + '#signup=' + token);
           await rpc('signup_activate', { p_hash: hash });
         } catch (_) { await rpc('signup_finish', { p_hash: hash }).catch(() => {}); }
@@ -183,18 +185,35 @@ export async function handleSignup(request, env, { rpc, fetch: rawFetch = fetch,
       if (typeof waitUntil === 'function') waitUntil(work); else await work;
       return reply(200, { ok: true });
     }
+    if (route === '/v1/signup/confirm') {
+      // The emailed link was opened (any browser): mark the row confirmed. Does not create anything and does not consume the link.
+      if (!validToken(body.token)) return reply(400, { error: 'invalid-link' });
+      const c = await rpc('signup_confirm', { p_hash: await sha256hex(body.token) });
+      return c && c.ok ? reply(200, { ok: true, poll: c.poll === true }) : reply(400, { error: 'invalid-link' });
+    }
+    if (route === '/v1/signup/status') {
+      // The starting browser asks, with its secret handle, whether its link was opened.
+      if (!validToken(body.handle)) return reply(400, { error: 'invalid-link' });
+      const st = await rpc('signup_status', { p_poll: await sha256hex(body.handle) });
+      const state = st && (st.state === 'pending' || st.state === 'confirmed') ? st.state : 'invalid';
+      return reply(200, { ok: true, state });
+    }
     if (route === '/v1/signup/peek') {
       if (!validToken(body.token)) return reply(400, { error: 'invalid-link' });
       const p = await rpc('signup_peek', { p_hash: await sha256hex(body.token) });
       return p && p.email ? reply(200, { ok: true, email: p.email }) : reply(400, { error: 'invalid-link' });
     }
     if (route === '/v1/signup/complete') {
-      if (!validToken(body.token)) return reply(400, { error: 'invalid-link' });
+      // Two ways in: the emailed token (password page, works from any browser) or the starting browser's handle (only after the link confirmed the row).
+      const byHandle = body.handle !== undefined;
+      if (byHandle ? !validToken(body.handle) : !validToken(body.token)) return reply(400, { error: 'invalid-link' });
       const pw = body.password;
       if (typeof pw !== 'string' || pw.length < 6 || pw.length > 128) return reply(400, { error: 'weak-password' });
-      const hash = await sha256hex(body.token);
-      const c = await rpc('signup_consume', { p_hash: hash });
+      let hash;
+      const c = byHandle ? await rpc('signup_consume_poll', { p_poll: await sha256hex(body.handle) }) : await rpc('signup_consume', { p_hash: hash = await sha256hex(body.token) });
       if (!c || !c.email) return reply(400, { error: 'invalid-link' });
+      if (byHandle) hash = c.hash;
+      if (!validHex64(hash)) return reply(503, { error: 'unavailable' });
       let r;
       try { r = await authCreate(env, f, c.email, pw); }
       catch (_) {

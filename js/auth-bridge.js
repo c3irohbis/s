@@ -385,11 +385,23 @@ async function signupCall(path, body) {
   try { r = await fetch(SIGNUP_API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(25000) }); }
   catch (_) { return { ok: false, error: "network" }; }
   let j = {}; try { j = await r.json(); } catch (_) {}
-  return { ok: r.ok, error: j && j.error, email: j && j.email };
+  return { ok: r.ok, error: j && j.error, email: j && j.email, state: j && j.state, poll: !!(j && j.poll) };
 }
 const suMsg = (e) => SU_MSG[e] || (e === "network" ? "تعذّر الاتصال. تأكد من الإنترنت وحاول مرة أخرى." : "الخدمة غير متاحة الآن. حاول بعد قليل.");
-B.startSignup = async function ({ email, ts, ce }) {
-  const r = await signupCall("start", { email: String(email || "").trim().toLowerCase(), ts: ts || "", ce: String(ce || "").slice(0, 24) });
+/* مقبض عشوائي يبقى في ذاكرة المتصفح اللي بدأ التسجيل فقط. للسيرفر نبعت بصمته (sha256) بس، والمقبض نفسه ما بيروحش إلا عند السؤال عن الحالة وإنشاء الحساب */
+const SU_HANDLE_RE = /^[A-Za-z0-9_-]{43}$/;
+async function sha256hex(str) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+B.newSignupHandle = function () {
+  const a = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode.apply(null, a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+B.startSignup = async function ({ email, ts, ce, handle }) {
+  const body = { email: String(email || "").trim().toLowerCase(), ts: ts || "", ce: String(ce || "").slice(0, 24) };
+  if (handle && SU_HANDLE_RE.test(handle)) body.ph = await sha256hex(handle);
+  const r = await signupCall("start", body);
   if (r.ok) return { status: "sent" };
   return { status: r.error === "cooldown" ? "cooldown" : "error", error: r.error, message: suMsg(r.error) };
 };
@@ -398,9 +410,20 @@ B.peekSignup = async function ({ token }) {
   if (r.ok && r.email) return { status: "ok", email: r.email };
   return { status: "invalid", message: suMsg(r.error === "invalid-link" ? "invalid-link" : r.error) };
 };
-B.completeSignup = async function ({ token, password }) {
+B.pollSignup = async function ({ handle }) {
+  if (!handle || !SU_HANDLE_RE.test(handle)) return { status: "invalid" };
+  const r = await signupCall("status", { handle });
+  if (r.ok && (r.state === "pending" || r.state === "confirmed" || r.state === "invalid")) return { status: r.state };
+  return { status: "error", message: suMsg(r.error) };
+};
+B.confirmSignup = async function ({ token }) {
+  const r = await signupCall("confirm", { token });
+  if (r.ok) return { status: "ok", poll: r.poll };
+  return { status: r.error === "invalid-link" ? "invalid" : "error", message: suMsg(r.error) };
+};
+B.completeSignup = async function ({ token, handle, password }) {
   busy = true;
-  const r = await signupCall("complete", { token, password });
+  const r = await signupCall("complete", handle ? { handle, password } : { token, password });
   if (!r.ok || !r.email) {
     busy = false;
     return { status: r.error === "invalid-link" ? "invalid" : r.error === "exists" ? "exists" : "error", message: suMsg(r.error) };

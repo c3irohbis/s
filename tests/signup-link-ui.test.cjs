@@ -2,12 +2,30 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs');
 const ui = fs.readFileSync(__dirname + '/../js/auth-ui.js', 'utf8');
 const br = fs.readFileSync(__dirname + '/../js/auth-bridge.js', 'utf8');
-test('register no longer creates a Firebase account or asks for a password before the link', () => {
+test('register creates no Firebase account before the link; password is asked in the form and kept in the field only', () => {
   const click = ui.slice(ui.indexOf('vBtn.addEventListener("click"'), ui.indexOf('function sendMail()'));
-  assert.ok(!/sendVerification|resendEmailLink|mailPass/.test(click));
-  assert.match(click, /Promise\.resolve\(\)\.then\(function \(\) \{ if \(sg !== VF\.gen\) return null; return invoke\("startSignup", \{ email: em \}\)/);
-  assert.match(ui, /\$\("mailPass"\)\.parentNode\.style\.display = "none"/);
+  assert.ok(!/sendVerification|resendEmailLink/.test(click));
+  assert.match(click, /invoke\("newSignupHandle"\)/);
+  assert.match(click, /invoke\("startSignup", \{ email: em, handle: nh2 \}\)/);
+  assert.match(click, /كلمة المرور يجب ألا تقل عن 6 أحرف/);
+  assert.ok(!/mailPass"\)\.parentNode\.style\.display = "none"/.test(ui));
   assert.match(ui, /\$\("mailSend"\)\.style\.display = "none"/);
+  assert.ok(!/localStorage[^\n]*mailPass|S\.draft[^\n]*mailPass/.test(ui));
+});
+test('starting browser polls with its handle, completes with the password it holds, and shares the save path', () => {
+  const v = ui.slice(ui.indexOf('function vPoll()'), ui.indexOf('document.addEventListener("visibilitychange"'));
+  assert.match(v, /invoke\("pollSignup", \{ handle: h \}\)/);
+  assert.match(v, /r\.status === "confirmed"\) return vComplete\(\)/);
+  assert.match(v, /call\("completeSignup", \{ handle: h, password: pw \}/);
+  assert.match(v, /finishCreated\(r\.email/);
+  assert.match(ui, /if \(VF\.state !== "sent" \|\| !VF\.handle \|\| VF\.polling \|\| document\.hidden\) return;/);
+});
+test('link page only confirms when a handle exists, with a delayed fallback to the password page', () => {
+  const l = ui.slice(ui.indexOf('function startSignupLink'), ui.indexOf('function startReset'));
+  assert.match(l, /call\("confirmSignup"/); assert.match(l, /r\.status === "ok" && r\.poll/); assert.match(l, /go\("confirmed"\)/);
+  assert.match(l, /> 25000/); assert.match(l, /openPasswordPage\(token, p\.email\)/);
+  assert.match(l, /call\("peekSignup"/);
+  assert.match(ui, /confirmed: function \(\) \{ openScreen\("Confirmed"\); \}/);
 });
 test('no periodic poll for verification any more', () => {
   assert.match(ui, /function vCheck\(\) \{\}/);
@@ -22,7 +40,9 @@ test('signup token comes only from the hash, is stripped from the URL, and holds
 test('link page sets the password and completes through completeSignup only', () => {
   const sub = ui.slice(ui.indexOf('if (suToken) {'), ui.indexOf('call("confirmReset"'));
   assert.match(sub, /call\("completeSignup", \{ token: tk, password: p1 \}/);
-  assert.match(sub, /sendEmailLink/); assert.match(sub, /checkEmailVerified/);
+  assert.match(sub, /finishCreated\(r\.email\)/);
+  const fc = ui.slice(ui.indexOf('function finishCreated'), ui.indexOf('function finish()'));
+  assert.match(fc, /sendEmailLink/); assert.match(fc, /checkEmailVerified/);
   assert.match(sub, /r\.status === "invalid"/); assert.match(sub, /r\.status === "exists"/);
 });
 test('bridge signup calls: no credentials, no referrer, fixed gateway URL, password never logged or stored', () => {
@@ -41,7 +61,12 @@ test('hash token regex accepts only 43-char urlsafe tokens', () => {
 
 test('bot check is off on the client: no widget, no token wait, release of busy state on rejection', () => {
   assert.doesNotMatch(ui, /tsWait|tsTake|tsEnsure|challenges\.cloudflare/);
-  assert.equal((ui.match(/Promise\.resolve\(\)\.then\(function \(\) \{ if \(s?r?[gs] !== VF\.gen\) return null; return invoke\("startSignup"/g) || []).length, 2);
+  assert.equal((ui.match(/invoke\("startSignup", \{ email: (VF\.email|em), handle: nh2?/g) || []).length, 2);
   assert.equal((ui.match(/function \(\) \{ if \(r[gs] !== VF\.gen\) return; VF\.busy = false;|function \(\) \{ if \(sg !== VF\.gen\) return; VF\.busy = false;/g) || []).length, 2);
   assert.match(br, /error: r\.error, message: suMsg/);
+});
+test('client scripts parse (syntax check)', () => {
+  const fs = require('node:fs');
+  new Function(fs.readFileSync('js/auth-ui.js', 'utf8'));
+  new Function(fs.readFileSync('js/auth-bridge.js', 'utf8').replace(/^import[\s\S]*?from\s+"[^"]+";?/mg, '').replace(/^export /mg, '').replace(/^\}\s*from\s+"[^"]+";?/mg, ''));
 });
