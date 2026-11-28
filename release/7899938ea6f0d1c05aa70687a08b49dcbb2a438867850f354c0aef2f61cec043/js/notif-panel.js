@@ -1,0 +1,263 @@
+(function() {
+  /* ── Storage ── */
+  let _notifs = [];          // { id, title, body, data, time, read, icon }
+  let _filterQ = "";
+  let _npOpen  = false;
+
+  /* ── Icon map by notif type ── */
+  function _iconForData(data) {
+    if (!data) return "🔔";
+    const t = data.type || data.chatType || "";
+    if (t === "private" || t === "dm")      return "💬";
+    if (t === "reply")                       return "↩️";
+    if (t === "mention")                     return "📣";
+    if (t === "admin")                       return "🔔";
+    if (t === "news")                        return "📰";
+    if (t === "lectures" || t === "lecture") return "📚";
+    if (t === "exams"    || t === "exam")    return "📅";
+    if (t === "sections" || t === "section") return "🏫";
+    return "🔔";
+  }
+
+  /* ── Relative time ── */
+  function _relTime(ts) {
+    const diff = Date.now() - ts;
+    if (diff < 60000)       return "الآن";
+    if (diff < 3600000)     return `منذ ${Math.floor(diff/60000)} د`;
+    if (diff < 86400000)    return `منذ ${Math.floor(diff/3600000)} س`;
+    if (diff < 172800000)   return "أمس";
+    return new Date(ts).toLocaleDateString("ar-EG", { month:"short", day:"numeric" });
+  }
+
+  /* ── Add a notification (called by patched showInAppNotif) ── */
+  window._npAddNotif = function(title, body, data, onClickCb) {
+    const n = {
+      id: Date.now() + "_" + Math.random().toString(36).slice(2),
+      title: title || "إشعار",
+      body:  body  || "",
+      data:  data  || {},
+      time:  Date.now(),
+      read:  false,
+      icon:  _iconForData(data),
+      _cb:   onClickCb || null
+    };
+    _notifs.unshift(n);
+    if (_notifs.length > 100) _notifs.length = 100;
+    _renderNotifs();
+    _updateProfileBadge();
+  };
+
+  window.addEventListener('news-inbox',e=>{
+    _notifs=_notifs.filter(n=>!n._news);
+    if(e.detail?.uid===window.currentUser?.uid)for(const n of e.detail.items||[])_notifs.push({id:'sqlnews_'+n.id,title:n.title,body:n.body+(n.removed?' (خبر محذوف)':''),data:{type:'news',sourceId:n.item_id},time:Date.parse(n.created_at),read:!!n.read_at,icon:'📰',_news:n.id});
+    _notifs.sort((a,b)=>b.time-a.time);_renderNotifs();_updateProfileBadge();
+  });
+  async function _newsAction(n,action){
+    if(!n?._news)return false;
+    try{await NewsAPI.request('notifications',{method:'POST',body:{action,id:n._news}});window.NewsNotifications?.refresh();return true;}catch{window.toast?.('تعذر حفظ الإشعار','error');return false;}
+  }
+  window.addEventListener('lectures-inbox',e=>{
+    _notifs=_notifs.filter(n=>!n._lec);
+    if(e.detail?.uid===window.currentUser?.uid)for(const n of e.detail.items||[])_notifs.push({id:'sqllec_'+n.id,title:n.title,body:n.body+(n.removed?' (محاضرة محذوفة)':''),data:{type:'lectures',sourceId:n.item_id},time:Date.parse(n.created_at),read:!!n.read_at,icon:'📚',_lec:n.id});
+    _notifs.sort((a,b)=>b.time-a.time);_renderNotifs();_updateProfileBadge();
+  });
+  async function _lecAction(n,action){
+    if(!n?._lec)return false;
+    try{await LecturesAPI.request('notifications',{method:'POST',body:{action,id:n._lec}});window.LecturesNotifications?.refresh();return true;}catch{window.toast?.('تعذر حفظ الإشعار','error');return false;}
+  }
+  window.addEventListener('exams-inbox',e=>{
+    _notifs=_notifs.filter(n=>!n._exm);
+    if(e.detail?.uid===window.currentUser?.uid)for(const n of e.detail.items||[])_notifs.push({id:'sqlexm_'+n.id,title:n.title,body:n.body+(n.removed?' (امتحان محذوف)':''),data:{type:'exams',sourceId:n.item_id},time:Date.parse(n.created_at),read:!!n.read_at,icon:'📅',_exm:n.id});
+    _notifs.sort((a,b)=>b.time-a.time);_renderNotifs();_updateProfileBadge();
+  });
+  async function _exmAction(n,action){
+    if(!n?._exm)return false;
+    try{await ExamsAPI.request('notifications',{method:'POST',body:{action,id:n._exm}});window.ExamsNotifications?.refresh();return true;}catch{window.toast?.('تعذر حفظ الإشعار','error');return false;}
+  }
+  window.addEventListener('sections-inbox',e=>{
+    _notifs=_notifs.filter(n=>!n._sec);
+    if(e.detail?.uid===window.currentUser?.uid)for(const n of e.detail.items||[])_notifs.push({id:'sqlsec_'+n.id,title:n.title,body:n.body+(n.removed?' (سكشن محذوف)':''),data:{type:'sections',sourceId:n.item_id},time:Date.parse(n.created_at),read:!!n.read_at,icon:'🏫',_sec:n.id});
+    _notifs.sort((a,b)=>b.time-a.time);_renderNotifs();_updateProfileBadge();
+  });
+  async function _secAction(n,action){
+    if(!n?._sec)return false;
+    try{await SectionsAPI.request('notifications',{method:'POST',body:{action,id:n._sec}});window.SectionsNotifications?.refresh();return true;}catch{window.toast?.('تعذر حفظ الإشعار','error');return false;}
+  }
+  /* ── Render ── */
+  function _renderNotifs() {
+    const list = document.getElementById("npNotifList");
+    if (!list) return;
+
+    const q = _filterQ.toLowerCase();
+    const filtered = q
+      ? _notifs.filter(n => n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
+      : _notifs;
+
+    if (!filtered.length) {
+      list.innerHTML = `<div class="np-empty"><i class="fa-solid fa-bell-slash"></i><span>${q ? "لا نتائج" : "لا توجد إشعارات"}</span></div>`;
+      return;
+    }
+
+    list.innerHTML = filtered.map(n => `
+      <div class="np-item ${n.read ? "" : "np-unread"}" id="npi_${n.id}" onclick="_npClickItem('${n.id}')">
+        <div class="np-item-icon">${n.icon}</div>
+        <div class="np-item-body">
+          <div class="np-item-title">${_esc(n.title)}</div>
+          <div class="np-item-msg">${_esc(n.body)}</div>
+          <div class="np-item-actions">
+            ${!n.read ? `<button class="np-item-act-btn read-btn" onclick="event.stopPropagation();_npMarkRead('${n.id}')"><i class="fa-solid fa-check"></i> تحديد كمقروء</button>` : ""}
+            <button class="np-item-act-btn del-btn" onclick="event.stopPropagation();_npDeleteItem('${n.id}')"><i class="fa-solid fa-xmark"></i> حذف</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
+          <div class="np-item-time">${_relTime(n.time)}</div>
+          ${!n.read ? '<div class="np-unread-dot"></div>' : ""}
+        </div>
+      </div>
+    `).join("");
+  }
+
+  function _esc(s) {
+    return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  /* ── Badge ── */
+  function _updateProfileBadge() {
+    const cnt = _notifs.filter(n => !n.read).length;
+    const b = document.getElementById("profileNotifBadge");
+    if (b) { b.textContent = cnt > 99 ? "99+" : cnt; b.style.display = cnt > 0 ? "inline-block" : "none"; }
+    const nb = document.getElementById("npUnreadBadge");
+    if (nb) { nb.textContent = cnt > 99 ? "99+" : cnt; nb.style.display = cnt > 0 ? "inline-block" : "none"; }
+  }
+
+  /* ── Open / Close ── */
+  window.openNotifPanel = function() {
+    const bd = document.getElementById("notifPanelBackdrop");
+    if (!bd) return;
+    bd.classList.add("np-open");
+    _npOpen = true;
+    _renderNotifs();
+    _updateProfileBadge();
+    // Also load prefs
+    if (typeof window._loadNpPrefs === "function") window._loadNpPrefs();
+  };
+
+  window.closeNotifPanel = function() {
+    const bd = document.getElementById("notifPanelBackdrop");
+    if (!bd) return;
+    bd.classList.remove("np-open");
+    _npOpen = false;
+  };
+
+  /* Redirect old openNotifSettings → settings tab of new panel */
+  window.openNotifSettings = function() {
+    window.openNotifPanel();
+    setTimeout(() => window.switchNpTab("settings"), 50);
+  };
+  window.closeNotifSettings = function() {
+    window.closeNotifPanel();
+  };
+
+  /* ── Tab switch ── */
+  window.switchNpTab = function(tab) {
+    document.querySelectorAll(".np-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".np-panel").forEach(p => p.classList.remove("active"));
+    const tabBtn = document.getElementById("npTab-" + tab);
+    const panel  = document.getElementById("npPanel-" + tab);
+    if (tabBtn) tabBtn.classList.add("active");
+    if (panel)  panel.classList.add("active");
+  };
+
+  /* ── Filter ── */
+  window.npFilterNotifs = function(val) {
+    _filterQ = (val || "").trim();
+    _renderNotifs();
+  };
+
+  /* ── Actions ── */
+  window._npClickItem = async function(id) {
+    const n = _notifs.find(x => x.id === id);
+    if (!n) return;
+    if(n._news&&!await _newsAction(n,'read'))return;
+    if(n._lec&&!await _lecAction(n,'read'))return;
+    if(n._exm&&!await _exmAction(n,'read'))return;
+    if(n._sec&&!await _secAction(n,'read'))return;
+    n.read = true;
+    _renderNotifs();
+    _updateProfileBadge();
+    if (n._cb) {
+      try { n._cb(n.data); } catch(e) {}
+      window.closeNotifPanel();
+    } else {
+      // default navigation by type
+      const d = n.data || {};
+      if (d.chatType === "private" && d.senderUid) { try { openDMChat(d.senderUid); window.closeNotifPanel(); } catch(e) {} }
+      else if (d.type === "news")     { try { if(n._news){window.showPage?.('page-home');window.goTab?.('tab-forum');}openForumSection("tab-news","tab-news-content"); window.closeNotifPanel(); } catch(e) {} }
+      else if (d.type === "exams" && n._exm) { try { window.showPage?.('page-home');window.goTab?.('tab-forum'); openForumSection("tab-exams","tab-exams-content"); window.closeNotifPanel(); } catch(e) {} }
+      else if (d.type === "sections" && n._sec) { try { window.showPage?.('page-home');window.goTab?.('tab-forum'); openForumSection("tab-sections","tab-sections-content"); window.closeNotifPanel(); } catch(e) {} }
+      else if (d.type === "lectures") { try { if(n._lec){window.showPage?.('page-home');window.goTab?.('tab-forum');} openForumSection("tab-lectures","tab-lectures-content"); window.closeNotifPanel(); } catch(e) {} }
+      else if (d.type === "exams")    { try { openForumSection("tab-exams","tab-exams-content"); window.closeNotifPanel(); } catch(e) {} }
+      else if (d.type === "sections") { try { openForumSection("tab-sections","tab-sections-content"); window.closeNotifPanel(); } catch(e) {} }
+    }
+  };
+
+  window._npMarkRead = async function(id) {
+    const n = _notifs.find(x => x.id === id);
+    if(n?._news&&!await _newsAction(n,'read'))return;
+    if(n?._lec&&!await _lecAction(n,'read'))return;
+    if(n?._exm&&!await _exmAction(n,'read'))return;
+    if(n?._sec&&!await _secAction(n,'read'))return;
+    if (n) { n.read = true; _renderNotifs(); _updateProfileBadge(); }
+  };
+
+  window._npDeleteItem = async function(id) {
+    const n=_notifs.find(x=>x.id===id);if(n?._news&&!await _newsAction(n,'dismiss'))return;if(n?._lec&&!await _lecAction(n,'dismiss'))return;if(n?._exm&&!await _exmAction(n,'dismiss'))return;if(n?._sec&&!await _secAction(n,'dismiss'))return;
+    _notifs = _notifs.filter(x => x.id !== id);
+    _renderNotifs();
+    _updateProfileBadge();
+  };
+
+  window.npClearAll = async function() {
+    const items=_notifs.slice();for(const n of items.filter(x=>x._news))if(!await _newsAction(n,'dismiss'))return;for(const n of items.filter(x=>x._lec))if(!await _lecAction(n,'dismiss'))return;for(const n of items.filter(x=>x._exm))if(!await _exmAction(n,'dismiss'))return;for(const n of items.filter(x=>x._sec))if(!await _secAction(n,'dismiss'))return;
+    _notifs = [];
+    _renderNotifs();
+    _updateProfileBadge();
+  };
+
+  /* ── Patch showInAppNotif to also store in panel ── */
+  function _patchIAN() {
+    const _origIAN = window.showInAppNotif;
+    if (typeof _origIAN === "function" && !_origIAN._npPatched) {
+      window.showInAppNotif = function(title, body, data, onClick) {
+        window._npAddNotif(title, body, data, onClick);
+        return _origIAN.apply(this, arguments);
+      };
+      window.showInAppNotif._npPatched = true;
+    }
+    // Also patch toggleNotifPanel (old bell) to open new panel
+    window.toggleNotifPanel = function() {
+      window.openNotifPanel();
+    };
+    _renderNotifs();
+    _updateProfileBadge();
+  }
+  // Try immediately first; fallback to DOMContentLoaded
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", _patchIAN);
+  } else {
+    _patchIAN();
+  }
+
+  /* ── ESC to close ── */
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape" && _npOpen) window.closeNotifPanel();
+  });
+
+  /* Expose loadPrefs hook for settings tab */
+  window._loadNpPrefs = function() {
+    if (window.currentUser && typeof window._loadPrefs === "function") {
+      window._loadPrefs(window.currentUser.uid);
+    }
+  };
+
+})();

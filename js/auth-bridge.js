@@ -57,6 +57,7 @@ const ERR = {
   "auth/invalid-action-code":  "الرابط غير صالح أو تم استخدامه من قبل، اطلب رابطًا جديدًا"
 };
 const CANCELLED = ["auth/popup-closed-by-user", "auth/cancelled-popup-request", "auth/user-cancelled"];
+const POPUP_FALLBACK = ["auth/popup-blocked", "auth/internal-error", "auth/operation-not-supported-in-this-environment"];   /* network-request-failed و web-storage-unsupported لا يعنيان أن النافذة غير مدعومة: لا بديل تلقائي */
 const errMsg = (e) => ERR[e && e.code] || (e && e.message) || "حدث خطأ، حاول مرة أخرى.";
 
 const SESSION_GONE = "انتهت الجلسة، سجّل الدخول من جديد.";
@@ -109,7 +110,14 @@ const isMobileLike = () => /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test
    وإلا موبايل → redirect وكمبيوتر → popup */
 function googleFlow() {
   try { const f = localStorage.getItem("bis_auth_flow"); if (f === "redirect" || f === "popup") return f; } catch (e) {}
+  /* نافذة Google فشلت/اتقفلت في هذا التبويب → باقي عمر التبويب يستخدم redirect (sessionStorage يموت مع التبويب، ولا يُمسح عمدًا حتى لا تتكرر نافذة معطوبة بعد تسجيل خروج). الـ override اليدوي أعلاه له الأولوية */
+  try { if (sessionStorage.getItem("bis_auth_flow_hint") === "redirect") return "redirect"; } catch (e) {}
   return isMobileLike() ? "redirect" : "popup";
+}
+/* تشخيص بلا أي قراءة/كتابة Firestore ولا شاشة: آخر نتيجة لمسار Google في sessionStorage + الكونسول فقط */
+function authDiag(flow, code, ms) {
+  try { sessionStorage.setItem("bis_auth_diag", JSON.stringify({ flow: flow, code: code || "ok", ms: ms, ts: Date.now() })); } catch (e) {}
+  try { if (code) console.warn("[auth] google " + flow + " -> " + code + " after " + ms + "ms"); } catch (e) {}
 }
 
 /* ── تحويل بيانات الواجهة {name, gender, dept, year} إلى بيانات الموقع {name, gender, worldId} ── */
@@ -189,9 +197,8 @@ B.loginEmail = async function ({ email, password }) {
   } catch (e) { busy = false; return { status: "error", message: errMsg(e) }; }
 };
 
-B.google = async function (draft) {
-  /* موبايل: redirect في نفس التبويب. الماركر يتخزن قبل التنقل ويكمّل الدخول بعد الرجوع */
-  if (googleFlow() === "redirect") {
+/* مسار redirect (موبايل، أو بديل لما النافذة تفشل) */
+async function googleRedirect(draft) {
     busy = true;
     try {
       sessionStorage.setItem(REDIRECT_KEY, JSON.stringify({ mode: draft ? "register" : "login", draft: draft || null, ts: Date.now() }));
@@ -248,16 +255,30 @@ B.google = async function (draft) {
       clearMarker(); busy = false;
       return { status: "error", message: errMsg(e) };
     }
-  }
+}
+
+B.google = async function (draft) {
+  if (googleFlow() === "redirect") return await googleRedirect(draft);
   busy = true;
+  const t0 = Date.now();
   try {
     const cred = await signInWithPopup(auth(), new GoogleAuthProvider());
+    authDiag("popup", null, Date.now() - t0);
     /* من شاشة إنشاء الحساب: حساب Google مسجّل مسبقًا = رفض (نافذة «الحساب مسجّل بالفعل») */
     if (draft && await userDoc(cred.user.uid)) { await signOut(auth()); busy = false; return { status: "exists" }; }
     return await afterSignIn(cred.user, draft || null);
   } catch (e) {
     busy = false;
-    if (CANCELLED.indexOf(e && e.code) !== -1) return { status: "cancelled" };
+    const code = e && e.code;
+    authDiag("popup", code || "error", Date.now() - t0);
+    /* النافذة نفسها لا تعمل في هذا المتصفح: بديل تلقائي بـ redirect */
+    if (POPUP_FALLBACK.indexOf(code) !== -1) {
+      try { sessionStorage.setItem("bis_auth_flow_hint", "redirect"); } catch (_) {}
+      return await googleRedirect(draft);
+    }
+    /* نافذة اتقفلت قبل ما تكمّل (إلغاء أو صفحة وسيطة معلّقة): إلغاء هادئ بلا تنقّل، وباقي عمر التبويب redirect */
+    if (code === "auth/popup-closed-by-user") { try { sessionStorage.setItem("bis_auth_flow_hint", "redirect"); } catch (_) {} return { status: "cancelled" }; }
+    if (CANCELLED.indexOf(code) !== -1) return { status: "cancelled" };
     return { status: "error", message: errMsg(e) };
   }
 };
