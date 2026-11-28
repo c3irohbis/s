@@ -1,0 +1,12 @@
+/* ============================================================================
+   Mascot Toast Adapter — الأنماط
+   ملف منفصل عن mascot.css (المجمّد من المرحلة 2) لأن ده خاص بتكامل Toast
+   تحديدًا. بيصمم بس .mascot-toast-slot، ومايلمسش أي كلاس .toast موجود.
+   ========================================================================= */
+
+.mascot-toast-slot {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-inline-end: 6px; /* RTL-aware تلقائيًا */
+}

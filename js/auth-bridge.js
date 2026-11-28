@@ -57,7 +57,7 @@ const ERR = {
   "auth/invalid-action-code":  "الرابط غير صالح أو تم استخدامه من قبل، اطلب رابطًا جديدًا"
 };
 const CANCELLED = ["auth/popup-closed-by-user", "auth/cancelled-popup-request", "auth/user-cancelled"];
-const POPUP_FALLBACK = ["auth/popup-blocked", "auth/internal-error", "auth/operation-not-supported-in-this-environment"];   /* network-request-failed و web-storage-unsupported لا يعنيان أن النافذة غير مدعومة: لا بديل تلقائي */
+const POPUP_FALLBACK = ["auth/popup-blocked", "auth/internal-error", "auth/operation-not-supported-in-this-environment"];   /* أخطاء «النافذة غير متاحة» (رسالة واضحة بلا redirect). network-request-failed و web-storage-unsupported ليسا منها */
 const errMsg = (e) => ERR[e && e.code] || (e && e.message) || "حدث خطأ، حاول مرة أخرى.";
 
 const SESSION_GONE = "انتهت الجلسة، سجّل الدخول من جديد.";
@@ -103,16 +103,14 @@ function clearSdkRedirectPending() {
   if (!k) return;
   try { sessionStorage.removeItem(k); } catch (e) {}
 }
-/* آيباد بوضع سطح المكتب يعرّف نفسه كـ Macintosh لكنه شاشة لمس → يُعامل كموبايل */
-const isMobileLike = () => /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent || "")
-  || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent || ""));
-/* اختيار المسار: override يدوي للدعم والاختبار (localStorage bis_auth_flow = redirect|popup)،
-   وإلا موبايل → redirect وكمبيوتر → popup */
+/* اختيار المسار: popup على كل الأجهزة (الموبايل أيضًا). redirect لا يعمل عند اختلاف الدومين:
+   نتيجته تُقرأ عبر iframe على authDomain (firebaseapp.com) والمتصفحات الحديثة تحجب هذا التخزين،
+   فيرجع getRedirectResult فارغًا ويعود المستخدم لشاشة الدخول بلا دخول. popup يرجع النتيجة عبر postMessage
+   فلا يتأثر. لا يوجد تحويل تلقائي إلى redirect عند فشل popup (معطوب في نفس البيئة).
+   override يدوي للدعم فقط (localStorage bis_auth_flow = redirect|popup). */
 function googleFlow() {
   try { const f = localStorage.getItem("bis_auth_flow"); if (f === "redirect" || f === "popup") return f; } catch (e) {}
-  /* نافذة Google فشلت/اتقفلت في هذا التبويب → باقي عمر التبويب يستخدم redirect (sessionStorage يموت مع التبويب، ولا يُمسح عمدًا حتى لا تتكرر نافذة معطوبة بعد تسجيل خروج). الـ override اليدوي أعلاه له الأولوية */
-  try { if (sessionStorage.getItem("bis_auth_flow_hint") === "redirect") return "redirect"; } catch (e) {}
-  return isMobileLike() ? "redirect" : "popup";
+  return "popup";
 }
 /* تشخيص بلا أي قراءة/كتابة Firestore ولا شاشة: آخر نتيجة لمسار Google في sessionStorage + الكونسول فقط */
 function authDiag(flow, code, ms) {
@@ -271,13 +269,10 @@ B.google = async function (draft) {
     busy = false;
     const code = e && e.code;
     authDiag("popup", code || "error", Date.now() - t0);
-    /* النافذة نفسها لا تعمل في هذا المتصفح: بديل تلقائي بـ redirect */
-    if (POPUP_FALLBACK.indexOf(code) !== -1) {
-      try { sessionStorage.setItem("bis_auth_flow_hint", "redirect"); } catch (_) {}
-      return await googleRedirect(draft);
-    }
-    /* نافذة اتقفلت قبل ما تكمّل (إلغاء أو صفحة وسيطة معلّقة): إلغاء هادئ بلا تنقّل، وباقي عمر التبويب redirect */
-    if (code === "auth/popup-closed-by-user") { try { sessionStorage.setItem("bis_auth_flow_hint", "redirect"); } catch (_) {} return { status: "cancelled" }; }
+    /* النافذة محجوبة أو غير مدعومة: لا تحويل إلى redirect (معطوب عبر الدومينات)؛ رسالة واضحة والزر يعود طبيعيًا للمحاولة */
+    if (POPUP_FALLBACK.indexOf(code) !== -1) return { status: "error", message: "المتصفح منع نافذة Google. اسمح بالنوافذ المنبثقة لهذا الموقع ثم حاول مرة أخرى، أو افتح الموقع في Chrome أو Safari." };
+    /* نافذة اتقفلت (إلغاء من المستخدم أو مصافحة منتهية): إلغاء هادئ والضغطة التالية تحاول popup من جديد */
+    if (code === "auth/popup-closed-by-user") return { status: "cancelled" };
     if (CANCELLED.indexOf(code) !== -1) return { status: "cancelled" };
     return { status: "error", message: errMsg(e) };
   }
